@@ -307,144 +307,169 @@
   var ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/27400579/43t6w40/';
   /* ─────────────────────────────────────────── */
 
-  /* Pre-fill from URL query params */
-  function qp(n){ return new URLSearchParams(window.location.search).get(n) || ''; }
+  /* ── Pre-fill fields from URL params set by goToCheckout() ── */
+  function qp(n) { return new URLSearchParams(window.location.search).get(n) || ''; }
   document.getElementById('firstName').value = qp('firstName');
   document.getElementById('bizName').value   = qp('business');
   document.getElementById('email').value     = qp('email');
-  document.getElementById('website').value   = qp('website');
+  document.getElementById('phone').value     = qp('phone');
   document.getElementById('city').value      = qp('city');
+  document.getElementById('website').value   = qp('website');
 
-  var stripe, elements, paymentElement;
+  var stripe, elements;
 
-  /* 1. Ask our Netlify Function to create a PaymentIntent */
+  /* ── Step 1: On page load, call our Netlify Function to create a PaymentIntent
+        All lead fields are sent NOW and stored in Stripe metadata.
+        This means stripe-webhook.js can read them back when payment succeeds,
+        even if the browser closes before the thank-you redirect. ── */
   async function initStripe() {
-    var email = document.getElementById('email').value.trim();
+    var payload = {
+      email:     document.getElementById('email').value.trim(),
+      firstName: document.getElementById('firstName').value.trim(),
+      business:  document.getElementById('bizName').value.trim(),
+      phone:     document.getElementById('phone').value.trim(),
+      city:      document.getElementById('city').value.trim(),
+      website:   document.getElementById('website').value.trim(),
+    };
 
-    var resp = await fetch('/.netlify/functions/create-payment-intent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email })
-    });
-
-    if (!resp.ok) {
-      var err = await resp.json().catch(function(){ return {}; });
-      showMessage('Could not start checkout: ' + (err.error || resp.statusText), true);
-      document.getElementById('loading-overlay').innerHTML =
-        '<span style="color:#f09595">Could not load payment form. Please refresh and try again.</span>';
-      return;
-    }
-
-    var data = await resp.json();
-    var clientSecret = data.clientSecret;
-
-    stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
-
-    elements = stripe.elements({
-      clientSecret: clientSecret,
-      appearance: {
-        theme: 'night',
-        variables: {
-          colorBackground: '#1c2333',
-          colorText: '#f0f2f8',
-          colorTextPlaceholder: '#8892aa',
-          colorPrimary: '#22d3a0',
-          borderRadius: '8px',
-          fontFamily: 'Inter, -apple-system, sans-serif',
-          fontSizeBase: '14px',
-          spacingUnit: '4px',
-        },
-        rules: {
-          '.Input': { border: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#1c2333' },
-          '.Input:focus': { border: '1px solid #22d3a0', boxShadow: 'none' },
-          '.Label': { color: '#8892aa', fontSize: '12px' },
-        }
-      }
-    });
-
-    paymentElement = elements.create('payment', {
-      layout: { type: 'tabs', defaultCollapsed: false }
-    });
-
-    paymentElement.mount('#payment-element');
-
-    paymentElement.on('ready', function() {
-      document.getElementById('loading-overlay').style.display = 'none';
-      document.getElementById('payment-element').style.display = '';
-      document.getElementById('pay-btn').style.display = '';
-      document.getElementById('secure-note').style.display = '';
-    });
-  }
-
-  /* Fire Zapier webhook */
-  function fireZap(data) {
     try {
-      var blob = new Blob([JSON.stringify(data)], { type: 'text/plain' });
-      navigator.sendBeacon(ZAPIER_WEBHOOK, blob);
-    } catch(e) { console.warn('Zap failed:', e); }
+      var resp = await fetch('/.netlify/functions/create-payment-intent', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        var err = await resp.json().catch(function(){ return {}; });
+        showMsg('Could not load payment form: ' + (err.error || resp.statusText), true);
+        document.getElementById('loading-overlay').innerHTML =
+          '<span style="color:#f09595">Payment form failed to load. Please refresh.</span>';
+        return;
+      }
+
+      var data = await resp.json();
+
+      stripe   = Stripe(STRIPE_PUBLISHABLE_KEY);
+      elements = stripe.elements({
+        clientSecret: data.clientSecret,
+        appearance: {
+          theme: 'night',
+          variables: {
+            colorBackground:      '#1c2333',
+            colorText:            '#f0f2f8',
+            colorTextPlaceholder: '#8892aa',
+            colorPrimary:         '#22d3a0',
+            borderRadius:         '8px',
+            fontFamily:           'Inter, -apple-system, sans-serif',
+            fontSizeBase:         '14px',
+            spacingUnit:          '4px',
+          },
+          rules: {
+            '.Input':       { border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#1c2333' },
+            '.Input:focus': { border:'1px solid #22d3a0', boxShadow:'none' },
+            '.Label':       { color:'#8892aa', fontSize:'12px' },
+          }
+        }
+      });
+
+      var paymentElement = elements.create('payment', {
+        layout: { type:'tabs', defaultCollapsed:false }
+      });
+      paymentElement.mount('#payment-element');
+
+      paymentElement.on('ready', function() {
+        document.getElementById('loading-overlay').style.display = 'none';
+        document.getElementById('payment-element').style.display = '';
+        document.getElementById('pay-btn').style.display         = '';
+        document.getElementById('secure-note').style.display     = '';
+      });
+
+    } catch(e) {
+      console.error('initStripe error:', e);
+      document.getElementById('loading-overlay').innerHTML =
+        '<span style="color:#f09595">Network error. Please refresh and try again.</span>';
+    }
   }
 
-  /* Loading state helpers */
-  function setLoading(loading) {
-    var btn   = document.getElementById('pay-btn');
-    var label = document.getElementById('btn-label');
-    var spin  = document.getElementById('btn-spinner');
-    btn.disabled        = loading;
-    label.style.display = loading ? 'none' : '';
-    spin.style.display  = loading ? '' : 'none';
+  /* ── Zap 1 helper: fire the LEAD webhook (same as lander form) ── */
+  function fireLeadZap(data) {
+    try {
+      navigator.sendBeacon(ZAP_LEAD_WEBHOOK,
+        new Blob([JSON.stringify(data)], { type:'text/plain' }));
+    } catch(e) { console.warn('Lead Zap failed (non-blocking):', e); }
   }
 
-  function showMessage(msg, isError) {
+  /* ── UI helpers ── */
+  function setLoading(on) {
+    document.getElementById('pay-btn').disabled          = on;
+    document.getElementById('btn-label').style.display   = on ? 'none' : '';
+    document.getElementById('btn-spinner').style.display = on ? '' : 'none';
+  }
+  function showMsg(msg, isError) {
     var el = document.getElementById('payment-message');
     el.textContent = msg;
     el.style.display = 'block';
     el.className = isError ? '' : 'success';
   }
 
-  /* 2. Confirm the payment when user clicks Pay */
+  /* ── Step 2: User clicks Pay
+        • Validate fields
+        • Fire Zap 1 with paymentStatus "Pending" (so Clay row exists before payment)
+        • confirmPayment → Stripe handles the card charge
+        • On success: Stripe redirects to /thank-you.html
+        • stripe-webhook.js independently fires Zap 2 with paymentStatus "Confirmed"
+          when Stripe's server confirms the charge — this is what triggers Clay enrichment ── */
   async function handlePayment() {
     var firstName = document.getElementById('firstName').value.trim();
     var bizName   = document.getElementById('bizName').value.trim();
     var email     = document.getElementById('email').value.trim();
+    var phone     = document.getElementById('phone').value.trim();
+    var city      = document.getElementById('city').value.trim();
+    var website   = document.getElementById('website').value.trim();
 
     if (!firstName || !bizName || !email) {
-      showMessage('Please fill in your first name, business name, and email.', true);
+      showMsg('Please fill in your name, business name, and email.', true);
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      showMessage('Please enter a valid email address.', true);
+      showMsg('Please enter a valid email address.', true);
       return;
     }
 
     setLoading(true);
     document.getElementById('payment-message').style.display = 'none';
 
-    fireZap({
-      firstName: firstName, business: bizName,
-      website: document.getElementById('website').value.trim(),
-      city:    document.getElementById('city').value.trim(),
-      email:   email, intent: 'audit',
-      paymentStatus: 'Pending', submittedAt: new Date().toISOString()
+    /* Zap 1 — create/update Clay row with Pending status */
+    fireLeadZap({
+      firstName:     firstName,
+      business:      bizName,
+      email:         email,
+      phone:         phone,
+      city:          city,
+      website:       website,
+      intent:        'audit',
+      paymentStatus: 'Pending',
+      submittedAt:   new Date().toISOString(),
     });
 
+    /* Stripe payment confirmation — redirects to /thank-you.html on success */
     var result = await stripe.confirmPayment({
       elements: elements,
       confirmParams: {
-        return_url: window.location.origin + '/brodop-thank-you',
+        return_url: window.location.origin + '/brodop-thank-you.html',
         payment_method_data: {
           billing_details: { name: firstName + ' ' + bizName, email: email }
         }
       }
     });
 
-    /* confirmPayment only reaches here on error — success redirects */
+    /* Only reaches here on error (success = redirect away) */
     if (result.error) {
-      showMessage(result.error.message, true);
+      showMsg(result.error.message, true);
       setLoading(false);
     }
   }
 
-  /* Kick off Stripe init on page load */
   window.addEventListener('DOMContentLoaded', initStripe);
 </script>
 </body>
