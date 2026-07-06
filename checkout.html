@@ -202,10 +202,13 @@
 </footer>
 
 <script>
-  /* ── CONFIG — only change these two values ── */
+  /* ════════════════════════════════════════════════════════
+     CONFIG  — set these two values, nothing else to change
+     ════════════════════════════════════════════════════════ */
   var STRIPE_PUBLISHABLE_KEY = 'pk_live_51SEmRD16DSGHSXAa0rsQyKDHwChBkAQN148GuNB7eXidBt7bpCE5ChGR1nDvref9U2RkF03iB5E6Phd0T4NxnZFx00jzDOBWhZ';
-  var ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/27400579/43t6w40/';
-  /* ─────────────────────────────────────────── */
+  //  ↑ Stripe Dashboard → Developers → API keys → Publishable key
+
+  /* ════════════════════════════════════════════════════════ */
 
   /* ── Pre-fill fields from URL params set by goToCheckout() ── */
   function qp(n) { return new URLSearchParams(window.location.search).get(n) || ''; }
@@ -291,14 +294,6 @@
     }
   }
 
-  /* ── Zap 1 helper: fire the LEAD webhook (same as lander form) ── */
-  function fireLeadZap(data) {
-    try {
-      navigator.sendBeacon(ZAP_LEAD_WEBHOOK,
-        new Blob([JSON.stringify(data)], { type:'text/plain' }));
-    } catch(e) { console.warn('Lead Zap failed (non-blocking):', e); }
-  }
-
   /* ── UI helpers ── */
   function setLoading(on) {
     document.getElementById('pay-btn').disabled          = on;
@@ -314,11 +309,11 @@
 
   /* ── Step 2: User clicks Pay
         • Validate fields
-        • Fire Zap 1 with paymentStatus "Pending" (so Clay row exists before payment)
         • confirmPayment → Stripe handles the card charge
         • On success: Stripe redirects to /thank-you.html
-        • stripe-webhook.js independently fires Zap 2 with paymentStatus "Confirmed"
-          when Stripe's server confirms the charge — this is what triggers Clay enrichment ── */
+        • stripe-webhook.js fires Zap 2 (paymentStatus "Confirmed") server-side
+          Note: Zap 1 (paymentStatus "Pending") already fired on the main page
+          when the user clicked "Run My AI Audit" — Clay row exists before this point ── */
   async function handlePayment() {
     var firstName = document.getElementById('firstName').value.trim();
     var bizName   = document.getElementById('bizName').value.trim();
@@ -339,24 +334,11 @@
     setLoading(true);
     document.getElementById('payment-message').style.display = 'none';
 
-    /* Zap 1 — create/update Clay row with Pending status */
-    fireLeadZap({
-      firstName:     firstName,
-      business:      bizName,
-      email:         email,
-      phone:         phone,
-      city:          city,
-      website:       website,
-      intent:        'audit',
-      paymentStatus: 'Pending',
-      submittedAt:   new Date().toISOString(),
-    });
-
     /* Stripe payment confirmation — redirects to /thank-you.html on success */
     var result = await stripe.confirmPayment({
       elements: elements,
       confirmParams: {
-        return_url: window.location.origin + '/brodop-thank-you.html',
+        return_url: window.location.origin + '/thank-you.html',
         payment_method_data: {
           billing_details: { name: firstName + ' ' + bizName, email: email }
         }
