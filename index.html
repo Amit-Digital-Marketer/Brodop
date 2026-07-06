@@ -1008,33 +1008,54 @@
     } catch(e){ console.warn('Zap webhook failed (non-blocking):', e); }
   }
 
-	function goToCheckout() {
-	  var data = {
-		firstName: document.getElementById('fName').value.trim(),
-		business:  document.getElementById('fBiz').value.trim(),
-		website:   document.getElementById('fUrl').value.trim(),
-		city:      document.getElementById('fCity').value.trim(),
-		phone:     document.getElementById('fPhone').value.trim(),
-		email:     document.getElementById('fEmail').value.trim(),
-	  };
+function goToCheckout() {
+  var data = {
+    firstName: document.getElementById('fName').value.trim(),
+    business:  document.getElementById('fBiz').value.trim(),
+    website:   document.getElementById('fUrl').value.trim(),
+    city:      document.getElementById('fCity').value.trim(),
+    phone:     document.getElementById('fPhone').value.trim(),
+    email:     document.getElementById('fEmail').value.trim(),
+  };
 
-	  if (!data.firstName || !data.business || !data.email) {
-		alert('Please add your first name, business name, and email so we know where to send your report.');
-		return;
-	  }
+  if (!data.firstName || !data.business || !data.email) {
+    alert('Please add your first name, business name, and email so we know where to send your report.');
+    return;
+  }
 
-	  /* Build query string to pre-fill checkout.html */
-	  var params = new URLSearchParams({
-		firstName: data.firstName,
-		business:  data.business,
-		website:   data.website,
-		city:      data.city,
-		phone:     data.phone,
-		email:     data.email,
-	  });
+  /* ── STEP 1: Fire Zap 1 immediately on form submit
+     Clay row is created RIGHT NOW with paymentStatus "Pending"
+     This happens before the user even sees the checkout page ── */
+  try {
+    var blob = new Blob([JSON.stringify({
+      firstName:     data.firstName,
+      business:      data.business,
+      email:         data.email,
+      phone:         data.phone,
+      city:          data.city,
+      website:       data.website,
+      intent:        'audit',
+      paymentStatus: 'Pending',
+      submittedAt:   new Date().toISOString(),
+    })], { type: 'text/plain' });
+    navigator.sendBeacon(ZAP_LEAD_WEBHOOK, blob);
+  } catch(e) {
+    console.warn('Lead Zap failed (non-blocking):', e);
+  }
 
-	  window.location.href = '/checkout.html?' + params.toString();
-	}
+  /* ── STEP 2: Redirect to checkout with all fields pre-filled ── */
+  var params = new URLSearchParams({
+    firstName: data.firstName,
+    business:  data.business,
+    website:   data.website,
+    city:      data.city,
+    phone:     data.phone,
+    email:     data.email,
+  });
+
+  window.location.href = '/checkout.html?' + params.toString();
+}
+
 
   /* ---------- faq accordion ---------- */
   function toggleFaq(btn){
