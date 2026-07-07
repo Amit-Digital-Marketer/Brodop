@@ -998,7 +998,8 @@
   var STRIPE_AUDIT   = 'https://buy.stripe.com/eVq7sDgTu85sey2eya7kc03';
   var STRIPE_BOOST   = 'https://buy.stripe.com/4gM00bbza3Pc75A1Lo7kc04';
   var ZAP_LEAD_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/27400579/43t6w40/';
-
+    var CHECKOUT_BOOST_URL = '/checkout-boost.html';
+  
   function fireZap(data){
     /* sendBeacon is guaranteed to complete even during page navigation.
        This is the correct API for fire-and-forget requests before redirect. */
@@ -1095,7 +1096,7 @@ function goToCheckout() {
   document.addEventListener('keydown', function(e){
     if(e.key === 'Escape'){ closeBoostModal(); }
   });
-  function submitBoostModal(){
+  /*function submitBoostModal(){
     var data = {
       firstName: document.getElementById('mName').value.trim(),
       business:  document.getElementById('mBiz').value.trim(),
@@ -1115,7 +1116,41 @@ function goToCheckout() {
     console.log('BroDop Boost AI lead captured:', data);
     var url = STRIPE_BOOST + (data.email ? '?prefilled_email=' + encodeURIComponent(data.email) : '');
     window.location.href = url;
+  }*/
+  function submitBoostModal(){
+    var data = {
+      firstName: document.getElementById('mName').value.trim(),
+      business:  document.getElementById('mBiz').value.trim(),
+      website:   document.getElementById('mUrl').value.trim(),
+      city:      document.getElementById('mCity').value.trim(),
+      phone:     document.getElementById('mPhone').value.trim(),
+      email:     document.getElementById('mEmail').value.trim(),
+      intent:    'service',
+      paymentStatus: 'Pending',
+      submittedAt: new Date().toISOString()
+    };
+    if(!data.firstName || !data.business || !data.email){
+      alert('Please add your first name, business name, and email to continue.');
+      return;
+    }
+    fireZap(data);
+    console.log('BroDop Boost AI lead captured:', data);
+
+    /* Pass the lead fields along as query params, the same way the $49
+       AI Visibility Audit flow does — checkout-boost.html reads these
+       via qp() to pre-fill its form. */
+    var params = new URLSearchParams({
+      firstName: data.firstName,
+      business:  data.business,
+      email:     data.email,
+      phone:     data.phone,
+      city:      data.city,
+      website:   data.website
+    });
+
+    window.location.href = CHECKOUT_BOOST_URL + '?' + params.toString();
   }
+  
 </script>
 
 <!-- ========== BOOST AI MODAL ========== -->
