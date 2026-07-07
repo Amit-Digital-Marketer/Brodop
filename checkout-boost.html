@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkout — BroDop Boost AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://js.stripe.com/v3/"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e1117; --card: #1c2333;
+    --border: rgba(255,255,255,0.08); --border-focus: rgba(255,255,255,0.15);
+    --text: #f0f2f8; --muted: #8892aa;
+    --teal: #22d3a0; --teal-dark: #17a87e; --teal-glow: rgba(34,211,160,0.12);
+    --red: rgba(226,75,74,0.1); --red-border: rgba(226,75,74,0.4); --red-text: #f09595;
+    --radius: 10px; --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  body { background:var(--bg); color:var(--text); font-family:var(--font); min-height:100vh; display:flex; flex-direction:column; }
+
+  /* ── NAV ── */
+  nav { display:flex; align-items:center; justify-content:space-between; padding:1rem 2rem; border-bottom:1px solid var(--border); }
+  .logo { display:flex; align-items:center; gap:0.5rem; text-decoration:none; color:var(--text); font-weight:700; font-size:1.1rem; }
+  .back-link { color:var(--muted); text-decoration:none; font-size:0.85rem; display:flex; align-items:center; gap:0.35rem; transition:color .2s; }
+  .back-link:hover { color:var(--text); }
+
+  /* ── LAYOUT ── */
+  main { flex:1; display:grid; grid-template-columns:1fr 1fr; max-width:980px; margin:0 auto; width:100%; gap:2.5rem; padding:3rem 2rem; }
+
+  /* ── ORDER SUMMARY (left) ── */
+  .summary h1 { font-size:1.5rem; font-weight:700; margin-bottom:0.4rem; line-height:1.25; }
+  .summary h1 span { color:var(--teal); }
+  .summary .sub { color:var(--muted); font-size:0.9rem; margin-bottom:2rem; line-height:1.5; }
+  .order-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:1.25rem 1.5rem; margin-bottom:1.5rem; }
+  .order-row { display:flex; justify-content:space-between; align-items:center; padding:0.55rem 0; font-size:0.9rem; }
+  .order-row:not(:last-child) { border-bottom:1px solid var(--border); }
+  .order-row .lbl { color:var(--muted); }
+  .order-row .val { font-weight:600; }
+  .order-row.total .lbl { color:var(--text); font-weight:600; }
+  .order-row.total .val { color:var(--teal); font-size:1.1rem; }
+  .bullets { display:flex; flex-direction:column; gap:0.6rem; margin-bottom:1.25rem; }
+  .bullet { display:flex; align-items:flex-start; gap:0.6rem; font-size:0.875rem; color:var(--muted); line-height:1.4; }
+  .bdot { width:18px; height:18px; background:var(--teal-glow); border:1px solid var(--teal); border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+  .bdot svg { width:10px; height:10px; stroke:var(--teal); fill:none; stroke-width:2.5; }
+  .included-note { display:flex; align-items:flex-start; gap:0.6rem; background:rgba(255,177,27,0.08); border:1px solid rgba(255,177,27,0.35); border-radius:var(--radius); padding:0.75rem 0.9rem; margin-bottom:1.5rem; font-size:0.82rem; color:#e8c98a; line-height:1.45; }
+  .trust { display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; color:var(--muted); }
+  .trust svg { width:14px; height:14px; stroke:var(--teal); fill:none; stroke-width:2; flex-shrink:0; }
+
+  /* ── FORM (right) ── */
+  .section-lbl { font-size:0.7rem; font-weight:600; letter-spacing:0.1em; color:var(--muted); text-transform:uppercase; margin-bottom:0.9rem; }
+  .field { margin-bottom:1rem; }
+  .field label { display:block; font-size:0.8rem; font-weight:500; color:var(--muted); margin-bottom:0.35rem; }
+  .field input {
+    width:100%; background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+    padding:0.65rem 0.85rem; color:var(--text); font-family:var(--font); font-size:0.9rem;
+    outline:none; transition:border-color .2s;
+  }
+  .field input::placeholder { color:var(--muted); }
+  .field input:focus { border-color:var(--teal); }
+  .field-row { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; }
+
+  /* Stripe Payment Element host */
+  #payment-element { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:1rem; margin-bottom:1rem; }
+
+  /* Loading spinner */
+  #loading-overlay { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; padding:2rem 0; color:var(--muted); font-size:0.9rem; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spinner { width:20px; height:20px; border:2px solid rgba(34,211,160,.2); border-top-color:var(--teal); border-radius:50%; animation:spin .7s linear infinite; }
+  .btn-spinner { width:16px; height:16px; border:2px solid rgba(0,0,0,.2); border-top-color:#0e1117; border-radius:50%; animation:spin .7s linear infinite; }
+
+  /* Pay button */
+  .btn-pay { width:100%; background:var(--teal); color:#0e1117; font-family:var(--font); font-size:0.95rem; font-weight:700; border:none; border-radius:var(--radius); padding:0.85rem 1.5rem; cursor:pointer; margin-top:0.75rem; transition:background .2s,transform .1s; display:flex; align-items:center; justify-content:center; gap:0.5rem; }
+  .btn-pay:hover { background:var(--teal-dark); }
+  .btn-pay:active { transform:scale(.99); }
+  .btn-pay:disabled { opacity:.6; cursor:not-allowed; transform:none; }
+
+  .secure-note { display:flex; align-items:center; justify-content:center; gap:0.4rem; font-size:0.75rem; color:var(--muted); margin-top:0.75rem; }
+  .secure-note svg { width:12px; height:12px; stroke:var(--muted); fill:none; stroke-width:2; }
+  .cancel-note { text-align:center; font-size:0.75rem; color:var(--muted); margin-top:0.5rem; }
+
+  #payment-message { display:none; border-radius:var(--radius); padding:0.65rem 0.85rem; font-size:0.83rem; margin-top:0.75rem; background:var(--red); border:1px solid var(--red-border); color:var(--red-text); }
+  #payment-message.success { background:var(--teal-glow); border:1px solid rgba(34,211,160,.4); color:var(--teal); }
+
+  footer { text-align:center; padding:1.5rem; color:var(--muted); font-size:0.75rem; border-top:1px solid var(--border); }
+  footer a { color:var(--muted); text-decoration:none; }
+  footer a:hover { color:var(--text); }
+  .divider { display:none; height:1px; background:var(--border); }
+
+  @media(max-width:700px){
+    main { grid-template-columns:1fr; padding:1.5rem 1rem; gap:0; }
+    .summary { margin-bottom:1.5rem; }
+    .divider { display:block; margin-bottom:1.5rem; }
+    nav { padding:.85rem 1rem; }
+    .field-row { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="https://bias.brodop.ai/" class="logo">
+    <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+      <path d="M20 6 L15 14 L10 12 L16 20 L10 28 L20 24 L30 28 L24 20 L30 12 L25 14Z" fill="#22d3a0"/>
+    </svg>
+    BroDop
+  </a>
+  <a href="https://bias.brodop.ai/" class="back-link">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+    Back to site
+  </a>
+</nav>
+
+<main>
+  <!-- ── LEFT: Order summary ── -->
+  <div class="summary">
+    <h1>Start <span>BroDop Boost AI</span></h1>
+    <p class="sub">We do the work every month to get your business cited, recommended, and trusted by ChatGPT, Gemini, and Perplexity.</p>
+
+    <div class="order-card">
+      <div class="order-row"><span class="lbl">Product</span><span class="val">BroDop Boost AI</span></div>
+      <div class="order-row"><span class="lbl">Billing</span><span class="val">Monthly, recurring</span></div>
+      <div class="order-row"><span class="lbl">Type</span><span class="val">Subscription — cancel anytime</span></div>
+      <div class="order-row total"><span class="lbl">Total today</span><span class="val">$999/mo</span></div>
+    </div>
+
+    <div class="bullets">
+      <div class="bullet"><div class="bdot"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div><span>Monthly optimization across ChatGPT, Gemini, Perplexity & beyond</span></div>
+      <div class="bullet"><div class="bdot"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div><span>Done-for-you: we handle the work, you handle your business</span></div>
+      <div class="bullet"><div class="bdot"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div><span>Monthly progress reports showing rank improvements</span></div>
+      <div class="bullet"><div class="bdot"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div><span>More AI-referred leads without adding to your workload</span></div>
+      <div class="bullet"><div class="bdot"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div><span>Month-to-month, no contract, cancel anytime</span></div>
+      <div class="bullet"><div class="bdot"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div><span>Direct access to the BroDop team</span></div>
+    </div>
+
+    <div class="included-note">
+      ★&nbsp; Your $49 AI Visibility Audit is included free (a $49 value) when you start Boost AI today.
+    </div>
+
+    <div class="trust">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Secured by Stripe · 256-bit SSL encryption
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ── RIGHT: Form + Payment ── -->
+  <div>
+    <div class="section-lbl">Your details</div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="firstName">First name *</label>
+        <input type="text" id="firstName" placeholder="Jordan" autocomplete="given-name">
+      </div>
+      <div class="field">
+        <label for="bizName">Business name *</label>
+        <input type="text" id="bizName" placeholder="Summit Roofing Co." autocomplete="organization">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="email">Email address *</label>
+      <input type="email" id="email" placeholder="you@yourbusiness.com" autocomplete="email">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="phone">Phone number</label>
+        <input type="tel" id="phone" placeholder="(716) 555-0100" autocomplete="tel">
+      </div>
+      <div class="field">
+        <label for="city">Primary city</label>
+        <input type="text" id="city" placeholder="Buffalo" autocomplete="address-level2">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="website">Website URL</label>
+      <input type="url" id="website" placeholder="https://yourbusiness.com" autocomplete="url">
+    </div>
+
+    <div class="section-lbl" style="margin-top:1rem;">Payment</div>
+
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <span>Loading secure payment form…</span>
+    </div>
+
+    <div id="payment-element" style="display:none;"></div>
+    <div id="payment-message"></div>
+
+    <button class="btn-pay" id="pay-btn" style="display:none;" onclick="handlePayment()">
+      <span id="btn-label">Start Boost AI — $999/mo →</span>
+      <div class="btn-spinner" id="btn-spinner" style="display:none;"></div>
+    </button>
+
+    <div class="cancel-note" id="cancel-note" style="display:none;">
+      You'll be billed $999 today, then $999 every 30 days. Cancel anytime, no contract.
+    </div>
+
+    <div class="secure-note" id="secure-note" style="display:none;">
+      <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Secure payment powered by <strong style="margin-left:3px;">Stripe</strong>
+    </div>
+  </div>
+</main>
+
+<footer>
+  &copy; 2025 BroDop &nbsp;·&nbsp;
+  <a href="https://bias.brodop.ai/">bias.brodop.ai</a> &nbsp;·&nbsp;
+  Questions? <a href="mailto:hello@brodop.ai">hello@brodop.ai</a>
+</footer>
+
+<script>
+  /* ════════════════════════════════════════════════════════
+     CONFIG  — set this, nothing else to change
+     ════════════════════════════════════════════════════════ */
+  var STRIPE_PUBLISHABLE_KEY = 'pk_live_51SEmRD16DSGHSXAa0rsQyKDHwChBkAQN148GuNB7eXidBt7bpCE5ChGR1nDvref9U2RkF03iB5E6Phd0T4NxnZFx00jzDOBWhZ';
+  //  ↑ Same Stripe Dashboard → Developers → API keys → Publishable key you used for the $49 page.
+  //  The PRICE the subscriber pays is controlled server-side in create-subscription.js
+  //  (Stripe Price ID for the $999/mo Boost AI plan), NOT here.
+
+  /* ════════════════════════════════════════════════════════ */
+
+  /* ── Pre-fill fields from URL params set by goToCheckout() ── */
+  function qp(n) { return new URLSearchParams(window.location.search).get(n) || ''; }
+  document.getElementById('firstName').value = qp('firstName');
+  document.getElementById('bizName').value   = qp('business');
+  document.getElementById('email').value     = qp('email');
+  document.getElementById('phone').value     = qp('phone');
+  document.getElementById('city').value      = qp('city');
+  document.getElementById('website').value   = qp('website');
+
+  var stripe, elements;
+
+  /* ── Step 1: On page load, call our Netlify Function to create a Stripe
+        Customer + Subscription (instead of a one-off PaymentIntent like the
+        $49 page). All lead fields are sent NOW and stored in Stripe metadata,
+        the same way the $49 flow does, so your webhook can read them back
+        when payment succeeds. ── */
+  async function initStripe() {
+    var payload = {
+      email:     document.getElementById('email').value.trim(),
+      firstName: document.getElementById('firstName').value.trim(),
+      business:  document.getElementById('bizName').value.trim(),
+      phone:     document.getElementById('phone').value.trim(),
+      city:      document.getElementById('city').value.trim(),
+      website:   document.getElementById('website').value.trim(),
+    };
+
+    try {
+      var resp = await fetch('/.netlify/functions/create-subscription', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        var err = await resp.json().catch(function(){ return {}; });
+        showMsg('Could not load payment form: ' + (err.error || resp.statusText), true);
+        document.getElementById('loading-overlay').innerHTML =
+          '<span style="color:#f09595">Payment form failed to load. Please refresh.</span>';
+        return;
+      }
+
+      var data = await resp.json();
+
+      stripe   = Stripe(STRIPE_PUBLISHABLE_KEY);
+      elements = stripe.elements({
+        clientSecret: data.clientSecret,
+        appearance: {
+          theme: 'night',
+          variables: {
+            colorBackground:      '#1c2333',
+            colorText:            '#f0f2f8',
+            colorTextPlaceholder: '#8892aa',
+            colorPrimary:         '#22d3a0',
+            borderRadius:         '8px',
+            fontFamily:           'Inter, -apple-system, sans-serif',
+            fontSizeBase:         '14px',
+            spacingUnit:          '4px',
+          },
+          rules: {
+            '.Input':       { border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#1c2333' },
+            '.Input:focus': { border:'1px solid #22d3a0', boxShadow:'none' },
+            '.Label':       { color:'#8892aa', fontSize:'12px' },
+          }
+        }
+      });
+
+      var paymentElement = elements.create('payment', {
+        layout: { type:'tabs', defaultCollapsed:false }
+      });
+      paymentElement.mount('#payment-element');
+
+      paymentElement.on('ready', function() {
+        document.getElementById('loading-overlay').style.display = 'none';
+        document.getElementById('payment-element').style.display = '';
+        document.getElementById('pay-btn').style.display         = '';
+        document.getElementById('cancel-note').style.display     = '';
+        document.getElementById('secure-note').style.display     = '';
+      });
+
+    } catch(e) {
+      console.error('initStripe error:', e);
+      document.getElementById('loading-overlay').innerHTML =
+        '<span style="color:#f09595">Network error. Please refresh and try again.</span>';
+    }
+  }
+
+  /* ── UI helpers ── */
+  function setLoading(on) {
+    document.getElementById('pay-btn').disabled          = on;
+    document.getElementById('btn-label').style.display   = on ? 'none' : '';
+    document.getElementById('btn-spinner').style.display = on ? '' : 'none';
+  }
+  function showMsg(msg, isError) {
+    var el = document.getElementById('payment-message');
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.className = isError ? '' : 'success';
+  }
+
+  /* ── Step 2: User clicks "Start Boost AI"
+        • Validate fields
+        • confirmPayment → Stripe charges the first invoice and starts the subscription
+        • On success: Stripe redirects to /thank-you-boost.html
+        • Your webhook can listen for invoice.payment_succeeded /
+          customer.subscription.created to fire downstream automations,
+          the same way stripe-webhook.js does for the $49 flow ── */
+  async function handlePayment() {
+    var firstName = document.getElementById('firstName').value.trim();
+    var bizName   = document.getElementById('bizName').value.trim();
+    var email     = document.getElementById('email').value.trim();
+    var phone     = document.getElementById('phone').value.trim();
+    var city      = document.getElementById('city').value.trim();
+    var website   = document.getElementById('website').value.trim();
+
+    if (!firstName || !bizName || !email) {
+      showMsg('Please fill in your name, business name, and email.', true);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showMsg('Please enter a valid email address.', true);
+      return;
+    }
+
+    setLoading(true);
+    document.getElementById('payment-message').style.display = 'none';
+
+    /* Stripe payment confirmation — redirects to /thank-you-boost.html on success */
+    var result = await stripe.confirmPayment({
+      elements: elements,
+      confirmParams: {
+        return_url: window.location.origin + '/boost-subscription-thank-you.html',
+        payment_method_data: {
+          billing_details: { name: firstName + ' ' + bizName, email: email }
+        }
+      }
+    });
+
+    /* Only reaches here on error (success = redirect away) */
+    if (result.error) {
+      showMsg(result.error.message, true);
+      setLoading(false);
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', initStripe);
+</script>
+</body>
+</html>
