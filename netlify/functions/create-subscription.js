@@ -64,8 +64,14 @@ exports.handler = async function (event) {
     });
 
     // 2. Create the subscription in "incomplete" state — Stripe generates the
-    //    first invoice + PaymentIntent, which the Payment Element on the
-    //    front end will confirm.
+    //    first invoice, which the Payment Element on the front end will confirm.
+    //
+    //    NOTE: Stripe has two ways an invoice exposes its client secret,
+    //    depending on your account's API version:
+    //      - Newer accounts: invoice.confirmation_secret.client_secret
+    //      - Older accounts: invoice.payment_intent.client_secret
+    //    We expand both and use whichever is present so this keeps working
+    //    regardless of which API version your Stripe account is pinned to.
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
       items: [{ price: priceId }],
@@ -74,16 +80,27 @@ exports.handler = async function (event) {
         save_default_payment_method: 'on_subscription',
         payment_method_types: ['card'],
       },
-      expand: ['latest_invoice.payment_intent'],
+      expand: ['latest_invoice.confirmation_secret', 'latest_invoice.payment_intent'],
       metadata: metadata,
     });
 
-    const paymentIntent = subscription.latest_invoice.payment_intent;
+    const invoice = subscription.latest_invoice;
+    const clientSecret =
+      (invoice && invoice.confirmation_secret && invoice.confirmation_secret.client_secret) ||
+      (invoice && invoice.payment_intent && invoice.payment_intent.client_secret);
+
+    if (!clientSecret) {
+      console.error('No client secret found on invoice:', JSON.stringify(invoice));
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'Could not retrieve a payment client secret from the invoice.' }),
+      };
+    }
 
     return {
       statusCode: 200,
       body: JSON.stringify({
-        clientSecret:    paymentIntent.client_secret,
+        clientSecret:    clientSecret,
         subscriptionId:  subscription.id,
         customerId:      customer.id,
       }),
