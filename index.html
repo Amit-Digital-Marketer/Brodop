@@ -1005,7 +1005,7 @@
        This is the correct API for fire-and-forget requests before redirect. */
     try {
       var blob = new Blob([JSON.stringify(data)], {type: 'text/plain'});
-      navigator.sendBeacon(ZAPIER_WEBHOOK, blob);
+      navigator.sendBeacon(ZAP_LEAD_WEBHOOK, blob);
     } catch(e){ console.warn('Zap webhook failed (non-blocking):', e); }
   }
 
