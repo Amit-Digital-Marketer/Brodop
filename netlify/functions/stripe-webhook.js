@@ -68,6 +68,18 @@ exports.handler = async function(event) {
   /* ── PAYMENT SUCCEEDED ───────────────────────────────────────── */
   if (stripeEvent.type === 'payment_intent.succeeded') {
     const pi = stripeEvent.data.object;
+
+    /* GUARD: payment_intent.succeeded fires account-wide — including for
+       PaymentIntents Stripe creates behind the scenes for Boost AI
+       subscription invoices (handled separately by stripe-boost-webhook.js).
+       If this PaymentIntent belongs to an invoice, it's a subscription
+       payment, not a one-time $49 audit purchase — skip it so the shared
+       Confirm Zap never fires twice for the same payment. */
+    if (pi.invoice) {
+      console.log(`[stripe-webhook] Skipping ${pi.id} — belongs to invoice ${pi.invoice} (handled by stripe-boost-webhook.js)`);
+      return { statusCode: 200, body: JSON.stringify({ received: true, skipped: 'subscription invoice payment' }) };
+    }
+
     const m  = pi.metadata || {};
 
     /* Rebuild full lead from metadata stored at checkout load time */
