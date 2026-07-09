@@ -162,6 +162,7 @@
   }
   .field input:focus,.field select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(63,224,197,.13);}
   .field input::placeholder{color:var(--text-dim);}
+  .field .field-hint{display:block;font-size:.72rem;color:var(--text-dim);margin-top:5px;font-family:'Schibsted Grotesk',sans-serif;line-height:1.35;text-transform:none;letter-spacing:0;font-weight:400;}
   .check-card .btn-primary{width:100%;justify-content:center;margin-top:6px;}
   .check-foot{text-align:center;font-size:.78rem;color:var(--text-dim);margin-top:13px;}
 
@@ -646,19 +647,20 @@
         <label for="fUrl">Website URL</label>
         <input type="url" id="fUrl" placeholder="https://yourbusiness.com" required />
       </div>
+      <div class="field">
+        <label for="fCity">Where is your business located?</label>
+        <input type="text" id="fCity" placeholder="City" required />
+        <span class="field-hint">If you have multiple locations, enter the city of your main or flagship location.</span>
+      </div>
       <div class="form-row">
         <div class="field">
-          <label for="fCity">Primary City</label>
-          <input type="text" id="fCity" placeholder="Buffalo" required />
+          <label for="fPhone">Phone Number</label>
+          <input type="tel" id="fPhone" placeholder="(555) 555-0100" required />
         </div>
         <div class="field">
-          <label for="fPhone">Phone Number</label>
-          <input type="tel" id="fPhone" placeholder="(716) 555-0100" required />
+          <label for="fEmail">Email Address</label>
+          <input type="email" id="fEmail" placeholder="you@yourbusiness.com" required />
         </div>
-      </div>
-      <div class="field">
-        <label for="fEmail">Email Address</label>
-        <input type="email" id="fEmail" placeholder="you@yourbusiness.com" required />
       </div>
       <button class="btn btn-primary" onclick="goToCheckout()">Run My AI Audit — $49 →</button>
       <div class="signup-reassure">
@@ -976,8 +978,8 @@
       <div class="f-col">
         <h5>Get In Touch</h5>
         <span>+1 (716) 202-2607</span>
-        <span>US Office — Buffalo, NY</span>
-        <span>European Office — Lisbon, PT</span>
+        <span>US Office, Buffalo, NY</span>
+        <span>European Office, Lisbon, PT</span>
       </div>
     </div>
     <div class="footer-brodop-strip">
@@ -1019,8 +1021,8 @@ function goToCheckout() {
     email:     document.getElementById('fEmail').value.trim(),
   };
 
-  if (!data.firstName || !data.business || !data.email) {
-    alert('Please add your first name, business name, and email so we know where to send your report.');
+  if (!data.firstName || !data.business || !data.website || !data.city || !data.phone || !data.email) {
+    alert('Please fill in your first name, business name, website, city, phone, and email so we can run your audit and send the report.');
     return;
   }
 
@@ -1129,8 +1131,8 @@ function goToCheckout() {
       paymentStatus: 'Pending',
       submittedAt: new Date().toISOString()
     };
-    if(!data.firstName || !data.business || !data.email){
-      alert('Please add your first name, business name, and email to continue.');
+    if(!data.firstName || !data.business || !data.website || !data.city || !data.phone || !data.email){
+      alert('Please fill in your first name, business name, website, city, phone, and email to continue.');
       return;
     }
     fireZap(data);
@@ -1178,19 +1180,20 @@ function goToCheckout() {
       <label for="mUrl">Website URL</label>
       <input type="url" id="mUrl" placeholder="https://yourbusiness.com" required />
     </div>
+    <div class="field">
+      <label for="mCity">Where is your business located?</label>
+      <input type="text" id="mCity" placeholder="City" required />
+      <span class="field-hint">If you have multiple locations, enter the city of your main or flagship location.</span>
+    </div>
     <div class="form-row">
       <div class="field">
-        <label for="mCity">Primary City</label>
-        <input type="text" id="mCity" placeholder="Buffalo" required />
+        <label for="mPhone">Phone Number</label>
+        <input type="tel" id="mPhone" placeholder="(555) 555-0100" required />
       </div>
       <div class="field">
-        <label for="mPhone">Phone Number</label>
-        <input type="tel" id="mPhone" placeholder="(716) 555-0100" required />
+        <label for="mEmail">Email Address</label>
+        <input type="email" id="mEmail" placeholder="you@yourbusiness.com" required />
       </div>
-    </div>
-    <div class="field">
-      <label for="mEmail">Email Address</label>
-      <input type="email" id="mEmail" placeholder="you@yourbusiness.com" required />
     </div>
     <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="submitBoostModal()">Get Started — Audit Included Free →</button>
     <div class="modal-reassure">
