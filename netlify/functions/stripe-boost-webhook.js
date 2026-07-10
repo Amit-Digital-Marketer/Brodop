@@ -7,11 +7,11 @@
    one-time flow) so nothing here can ever affect that pipeline.
 
    It fires the SAME two Zapier hooks the $49 flow uses (per your
-   instruction — ZAP_BOOST_CONFIRM_WEBHOOK points at the same Zap URL as
+   instruction — ZAP_CONFIRM_WEBHOOK points at the same Zap URL as
    ZAP_CONFIRM_WEBHOOK), so both flows land in the same Clay table:
 
      ZAP_LEAD_WEBHOOK          → Zap 1  (Clay "Find or Create Row" by email)
-     ZAP_BOOST_CONFIRM_WEBHOOK → Zap 2  (Clay "Find Row" by email →
+     ZAP_CONFIRM_WEBHOOK → Zap 2  (Clay "Find Row" by email →
                                   "Update Row" paymentStatus = Confirmed)
                                   ★ Same Zap URL as ZAP_CONFIRM_WEBHOOK ★
 
@@ -30,7 +30,7 @@
                                      own Stripe webhook setup, do NOT reuse
                                      the $49 endpoint's secret)
      ZAP_LEAD_WEBHOOK            →  same Zap 1 URL as the $49 flow
-     ZAP_BOOST_CONFIRM_WEBHOOK   →  same URL as ZAP_CONFIRM_WEBHOOK (per your
+     ZAP_CONFIRM_WEBHOOK   →  same URL as ZAP_CONFIRM_WEBHOOK (per your
                                      instruction — both flows confirm to the
                                      same Clay pipeline)
 
@@ -118,6 +118,34 @@ exports.handler = async function(event) {
 
     console.log(`[stripe-boost-webhook] ✓ Boost AI payment succeeded (${isFirstInvoice ? 'first charge' : 'renewal'}): ${lead.email} — $${(invoice.amount_paid/100).toFixed(2)} ${invoice.currency.toUpperCase()}`);
 
+    /* DEFENSIVE CHECK — don't just trust the event name. Re-fetch the
+       subscription and invoice fresh from Stripe and confirm all three
+       objects genuinely reflect a completed payment before telling Clay
+       anything is Confirmed. This guards against any edge case (webhook
+       replay, race condition, stale event data, 3DS still pending) the
+       same way Stripe's own guidance recommends — just applied to the
+       invoice-based event our Subscriptions-API flow actually uses,
+       since we don't use Checkout Sessions. */
+    let verifiedOk = false;
+    try {
+      const freshInvoice = await stripe.invoices.retrieve(invoice.id, {
+        expand: ['payment_intent'],
+      });
+      const freshSubscription = await stripe.subscriptions.retrieve(invoice.subscription);
+
+      const invoicePaid   = freshInvoice.status === 'paid';
+      const subActive      = freshSubscription.status === 'active' || freshSubscription.status === 'trialing';
+      const piSucceeded    = !freshInvoice.payment_intent || freshInvoice.payment_intent.status === 'succeeded';
+
+      verifiedOk = invoicePaid && subActive && piSucceeded;
+
+      if (!verifiedOk) {
+        console.warn(`[stripe-boost-webhook] Verification FAILED for ${lead.email} — invoice.status=${freshInvoice.status}, subscription.status=${freshSubscription.status}, paymentIntent.status=${freshInvoice.payment_intent && freshInvoice.payment_intent.status}. Not confirming in Clay.`);
+      }
+    } catch (err) {
+      console.error('[stripe-boost-webhook] Verification lookup failed:', err.message);
+    }
+
     /* ZAP 1 — update Clay row (same hook as lander form / $49 flow, matched by email) */
     await fireZapier(process.env.ZAP_LEAD_WEBHOOK, {
       ...lead,
@@ -127,9 +155,10 @@ exports.handler = async function(event) {
     }, 'Zap1-Lead-Boost');
 
     /* ZAP 2 — payment confirmed. Only fire "Confirmed" on the FIRST invoice
-       (subscription_create) so monthly renewals don't re-trigger onboarding /
-       enrichment in Clay. Renewals are still logged above for visibility. */
-    if (isFirstInvoice) {
+       (subscription_create) AND only if the defensive check above passed,
+       so monthly renewals don't re-trigger onboarding, and no premature
+       or unverified event can flip Clay to Confirmed. */
+    if (isFirstInvoice && verifiedOk) {
       await fireZapier(process.env.ZAP_CONFIRM_WEBHOOK, {
         ...lead,
         intent:               'boost',
@@ -140,8 +169,10 @@ exports.handler = async function(event) {
         stripeInvoiceId:      invoice.id,
         paidAt:               new Date(invoice.created * 1000).toISOString(),
       }, 'Zap2-Confirm-Boost');
-    } else {
+    } else if (!isFirstInvoice) {
       console.log(`[stripe-boost-webhook] Renewal payment — not re-firing Confirmed status for ${lead.email}`);
+    } else {
+      console.log(`[stripe-boost-webhook] First invoice but verification failed — NOT confirming ${lead.email} in Clay`);
     }
   }
 
