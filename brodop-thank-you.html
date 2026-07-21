@@ -23,6 +23,33 @@
         y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
     })(window, document, "clarity", "script", "x7ohtnbglt");
 </script>
+<!-- OpenAI Ads Pixel - BroDop Instant AI Score ($49 BiAS) -->
+<script>
+  window.oaiq = window.oaiq || function () {
+    (window.oaiq.q = window.oaiq.q || []).push(arguments);
+  };
+  oaiq("init", { pixelId: "NWYjfp4mtcehMcVGjMZGfP" });
+
+  // Fire the purchase conversion ONLY on a genuine Stripe redirect.
+  // Stripe appends redirect_status=succeeded and a payment_intent id to the
+  // return_url after a real, completed payment. A direct visit to this page
+  // has neither, so no conversion fires. The payment_intent is used as the
+  // event_id so a page refresh cannot double-count the same order.
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get("redirect_status") === "succeeded") {
+      var pi = params.get("payment_intent") || ("bias_" + Date.now());
+      oaiq("measure", "order_created", {
+        type: "contents",
+        amount: 4900,
+        currency: "USD"
+      }, {
+        event_id: pi
+      });
+    }
+  })();
+</script>
+<script async src="https://bzrcdn.openai.com/sdk/oaiq.min.js"></script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>You're in — BroDop Instant AI Score</title>

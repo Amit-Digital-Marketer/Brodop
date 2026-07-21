@@ -24,6 +24,33 @@
         y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
     })(window, document, "clarity", "script", "x7ohtnbglt");
 </script>
+<!-- OpenAI Ads Pixel - BroDop Boost AI ($999/mo) -->
+<script>
+  window.oaiq = window.oaiq || function () {
+    (window.oaiq.q = window.oaiq.q || []).push(arguments);
+  };
+  oaiq("init", { pixelId: "T7RESovUg984kuYmDG38Ph" });
+
+  // Fire the purchase conversion ONLY on a genuine Stripe redirect.
+  // Stripe appends redirect_status=succeeded and a payment_intent id to the
+  // return_url after the first subscription invoice is paid. A direct visit
+  // has neither, so no conversion fires. The payment_intent is used as the
+  // event_id so a page refresh cannot double-count the same order.
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get("redirect_status") === "succeeded") {
+      var pi = params.get("payment_intent") || ("boost_" + Date.now());
+      oaiq("measure", "order_created", {
+        type: "contents",
+        amount: 99900,
+        currency: "USD"
+      }, {
+        event_id: pi
+      });
+    }
+  })();
+</script>
+<script async src="https://bzrcdn.openai.com/sdk/oaiq.min.js"></script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Welcome to BroDop Boost AI</title>
