@@ -40,7 +40,10 @@
     var params = new URLSearchParams(window.location.search);
     if (params.get("redirect_status") === "succeeded") {
       var pi = params.get("payment_intent") || ("boost_" + Date.now());
-      oaiq("measure", "order_created", {
+      // Event name must match the OpenAI Ads conversion for the Boost pixel,
+      // which is configured as "subscription_created" (the $49 page uses
+      // "order_created"). Mismatched names are silently not counted.
+      oaiq("measure", "subscription_created", {
         type: "contents",
         amount: 99900,
         currency: "USD"
