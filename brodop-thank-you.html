@@ -8,12 +8,32 @@
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
   gtag('config', 'G-Z1K9N4CKEL');
-  // Fire conversion event - this page is only reachable via completed Stripe checkout
-  gtag('event', 'purchase', {
-    'send_to': 'G-Z1K9N4CKEL',
-    'event_category': 'ecommerce',
-    'event_label': 'bias_audit_purchase'
-  });
+  gtag('config', 'AW-18239165178'); // Google Ads conversion tracking
+
+  // Purchase events fire ONLY on a genuine Stripe redirect. Stripe appends
+  // redirect_status=succeeded and a payment_intent id to the return_url after
+  // a real completed payment. A direct visit or bookmark has neither, so no
+  // conversion fires. payment_intent is passed as transaction_id so a page
+  // refresh cannot double-count the same order.
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('redirect_status') !== 'succeeded') return;
+    var txnId = params.get('payment_intent') || '';
+
+    // Google Ads - $49 AI Visibility Audit purchase conversion
+    gtag('event', 'conversion', {
+      'send_to': 'AW-18239165178/PARkCM3Y7cAcEPqljvlD',
+      'transaction_id': txnId
+    });
+
+    // Google Analytics 4 - purchase event
+    gtag('event', 'purchase', {
+      'send_to': 'G-Z1K9N4CKEL',
+      'event_category': 'ecommerce',
+      'event_label': 'bias_audit_purchase',
+      'transaction_id': txnId
+    });
+  })();
 </script>
 <!-- Microsoft Clarity -->
 <script type="text/javascript">
