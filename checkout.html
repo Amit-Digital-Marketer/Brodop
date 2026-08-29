@@ -318,6 +318,17 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
         document.getElementById('payment-element').style.display = '';
         document.getElementById('pay-btn').style.display         = '';
         document.getElementById('secure-note').style.display     = '';
+
+        // Meta Pixel - InitiateCheckout fires once the Stripe card form has
+        // actually rendered in front of the visitor. If the PaymentIntent call
+        // or Stripe fails, the form never renders and no event fires, which is
+        // correct: those visitors did not really initiate a checkout.
+        if (typeof fbq === 'function') {
+          fbq('track', 'InitiateCheckout', {
+            value: 49.00,
+            currency: 'USD'
+          });
+        }
       });
 
     } catch(e) {
