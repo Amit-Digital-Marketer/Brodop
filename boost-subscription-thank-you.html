@@ -89,7 +89,8 @@ fbq('track', 'PageView');
       // which is configured as "subscription_created" (the $49 page uses
       // "order_created"). Mismatched names are silently not counted.
       oaiq("measure", "subscription_created", {
-        type: "contents",
+        type: "plan_enrollment",
+        plan_id: "boost_ai_monthly",
         amount: 99900,
         currency: "USD"
       }, {
