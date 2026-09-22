@@ -151,7 +151,8 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <div class="order-row"><span class="lbl">Product</span><span class="val">BiAS Instant AI Score</span></div>
       <div class="order-row"><span class="lbl">Delivery</span><span class="val">Within 1 hour</span></div>
       <div class="order-row"><span class="lbl">Type</span><span class="val">One-time, no subscription</span></div>
-      <div class="order-row total"><span class="lbl">Total today</span><span class="val">$49</span></div>
+      <div class="order-row" id="discount-row" style="display:none;"><span class="lbl">Discount</span><span class="val" id="discount-val" style="color:var(--teal);">-$0.00</span></div>
+      <div class="order-row total"><span class="lbl">Total today</span><span class="val" id="total-val">$49.00</span></div>
     </div>
 
     <div class="bullets">
@@ -205,6 +206,17 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <input type="url" id="website" placeholder="https://yourbusiness.com" autocomplete="url">
     </div>
 
+    <div class="section-lbl" style="margin-top:1rem;">Promo code</div>
+    <div class="field-row" style="align-items:flex-start;">
+      <div class="field" style="margin-bottom:0;">
+        <input type="text" id="promoCode" placeholder="Enter code" autocomplete="off" style="text-transform:uppercase;">
+      </div>
+      <button type="button" id="promo-btn"
+        style="width:100%; background:transparent; color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.65rem 0.85rem; font-family:var(--font); font-size:0.9rem; font-weight:600; cursor:pointer;"
+        onclick="handlePromo()">Apply</button>
+    </div>
+    <div id="promo-message" style="display:none; font-size:0.8rem; margin-bottom:1rem;"></div>
+
     <div class="section-lbl" style="margin-top:1rem;">Payment</div>
 
     <div id="loading-overlay">
@@ -253,6 +265,9 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
   document.getElementById('website').value   = qp('website');
 
   var stripe, elements;
+  var currentPaymentIntentId = null;   // set once create-payment-intent responds
+  var promoApplied           = false;
+  var BASE_AMOUNT_CENTS      = 4900;   // must match netlify/functions create-payment-intent.js / apply-coupon.js
 
   /* ── Step 1: On page load, call our Netlify Function to create a PaymentIntent
         All lead fields are sent NOW and stored in Stripe metadata.
@@ -284,6 +299,7 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       }
 
       var data = await resp.json();
+      currentPaymentIntentId = data.paymentIntentId;
 
       stripe   = Stripe(STRIPE_PUBLISHABLE_KEY);
       elements = stripe.elements({
@@ -349,6 +365,100 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     el.textContent = msg;
     el.style.display = 'block';
     el.className = isError ? '' : 'success';
+  }
+
+  function fmt(cents) { return '$' + (cents / 100).toFixed(2); }
+
+  /* Reflect a (possibly discounted) total across the order summary,
+     the pay button label, and the discount line. */
+  function updateTotalsUI(totalCents, discountCents) {
+    document.getElementById('total-val').textContent = fmt(totalCents);
+    document.getElementById('btn-label').textContent  = 'Pay ' + fmt(totalCents) + ' — get my audit →';
+    var row = document.getElementById('discount-row');
+    if (discountCents > 0) {
+      document.getElementById('discount-val').textContent = '-' + fmt(discountCents);
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+  }
+
+  /* ── Promo code: Apply / Remove ──────────────────────────────────
+     Calls apply-coupon.js, which validates the code against Stripe and
+     updates the PaymentIntent's amount server-side (the client never
+     computes or trusts its own discount math). After the amount changes
+     on the PaymentIntent, elements.fetchUpdates() refreshes the already
+     -mounted Payment Element to reflect the new amount without a remount. ── */
+  async function handlePromo() {
+    var btn   = document.getElementById('promo-btn');
+    var input = document.getElementById('promoCode');
+    var msg   = document.getElementById('promo-message');
+
+    if (!currentPaymentIntentId) {
+      msg.textContent = 'Payment form is still loading — try again in a moment.';
+      msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+      return;
+    }
+
+    if (promoApplied) {
+      /* ── Remove ── */
+      btn.disabled = true; btn.textContent = 'Removing…';
+      try {
+        var resp = await fetch('/.netlify/functions/apply-coupon', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ paymentIntentId: currentPaymentIntentId, action: 'remove' }),
+        });
+        var data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Could not remove code');
+
+        await elements.fetchUpdates();
+        updateTotalsUI(data.newAmount, 0);
+
+        promoApplied  = false;
+        input.value   = '';
+        input.disabled = false;
+        btn.textContent = 'Apply';
+        msg.style.display = 'none';
+      } catch (e) {
+        msg.textContent = e.message; msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+        btn.textContent = 'Remove';
+      }
+      btn.disabled = false;
+      return;
+    }
+
+    /* ── Apply ── */
+    var code = input.value.trim();
+    if (!code) {
+      msg.textContent = 'Enter a code first.'; msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Applying…'; msg.style.display = 'none';
+
+    try {
+      var resp = await fetch('/.netlify/functions/apply-coupon', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ paymentIntentId: currentPaymentIntentId, code: code }),
+      });
+      var data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Invalid code');
+
+      await elements.fetchUpdates();
+      updateTotalsUI(data.newAmount, data.discountCents);
+
+      promoApplied    = true;
+      input.disabled  = true;
+      btn.textContent = 'Remove';
+      msg.textContent = 'Code "' + code + '" applied ✓';
+      msg.style.color = 'var(--teal)'; msg.style.display = 'block';
+    } catch (e) {
+      msg.textContent = e.message; msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+      btn.textContent = 'Apply';
+    }
+    btn.disabled = false;
   }
 
   /* ── Step 2: User clicks Pay
