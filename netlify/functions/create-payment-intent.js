@@ -45,7 +45,13 @@ exports.handler = async function(event) {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientSecret: paymentIntent.client_secret }),
+      /* paymentIntentId is returned alongside clientSecret so the client can
+         later call apply-coupon.js against this same PaymentIntent when the
+         visitor enters a promo code. */
+      body: JSON.stringify({
+        clientSecret:    paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+      }),
     };
 
   } catch (err) {
