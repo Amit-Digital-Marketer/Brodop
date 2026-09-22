@@ -153,7 +153,8 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <div class="order-row"><span class="lbl">Product</span><span class="val">BroDop Boost AI</span></div>
       <div class="order-row"><span class="lbl">Billing</span><span class="val">Monthly, recurring</span></div>
       <div class="order-row"><span class="lbl">Type</span><span class="val">Subscription — cancel anytime</span></div>
-      <div class="order-row total"><span class="lbl">Total today</span><span class="val">$999/mo</span></div>
+      <div class="order-row" id="discount-row" style="display:none;"><span class="lbl">Discount</span><span class="val" id="discount-val" style="color:var(--teal);">-$0.00</span></div>
+      <div class="order-row total"><span class="lbl">Total today</span><span class="val" id="total-val">$999/mo</span></div>
     </div>
 
     <div class="bullets">
@@ -213,6 +214,17 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <input type="url" id="website" placeholder="https://yourbusiness.com" autocomplete="url">
     </div>
 
+    <div class="section-lbl" style="margin-top:1rem;">Promo code</div>
+    <div class="field-row" style="align-items:flex-start;">
+      <div class="field" style="margin-bottom:0;">
+        <input type="text" id="promoCode" placeholder="Enter code" autocomplete="off" style="text-transform:uppercase;">
+      </div>
+      <button type="button" id="promo-btn"
+        style="width:100%; background:transparent; color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.65rem 0.85rem; font-family:var(--font); font-size:0.9rem; font-weight:600; cursor:pointer;"
+        onclick="handlePromo()">Apply</button>
+    </div>
+    <div id="promo-message" style="display:none; font-size:0.8rem; margin-bottom:1rem;"></div>
+
     <div class="section-lbl" style="margin-top:1rem;">Payment</div>
 
     <div id="loading-overlay">
@@ -265,7 +277,55 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
   document.getElementById('city').value      = qp('city');
   document.getElementById('website').value   = qp('website');
 
-  var stripe, elements;
+  var stripe, elements, paymentElement;
+  var currentSubscriptionId = null;   // set once create-subscription responds
+  var currentCustomerId     = null;
+  var promoApplied          = false;
+  var BASE_MONTHLY_CENTS    = 99900;  // $999.00 — must match the Boost AI Price in Stripe
+
+  /* ── Mount (or re-mount, after a coupon apply/remove) the Payment
+        Element against a given clientSecret. Coupon changes on this page
+        recreate the Subscription (see comment in apply-coupon-subscription.js
+        for why), which means a brand-new PaymentIntent/clientSecret each
+        time — so, unlike the $49 page's elements.fetchUpdates(), here we
+        unmount the old Payment Element and mount a fresh one. ── */
+  function mountPaymentElement(clientSecret) {
+    return new Promise(function(resolve) {
+      if (paymentElement) {
+        try { paymentElement.unmount(); } catch (e) {}
+      }
+
+      stripe   = Stripe(STRIPE_PUBLISHABLE_KEY);
+      elements = stripe.elements({
+        clientSecret: clientSecret,
+        appearance: {
+          theme: 'night',
+          variables: {
+            colorBackground:      '#1c2333',
+            colorText:            '#f0f2f8',
+            colorTextPlaceholder: '#8892aa',
+            colorPrimary:         '#22d3a0',
+            borderRadius:         '8px',
+            fontFamily:           'Inter, -apple-system, sans-serif',
+            fontSizeBase:         '14px',
+            spacingUnit:          '4px',
+          },
+          rules: {
+            '.Input':       { border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#1c2333' },
+            '.Input:focus': { border:'1px solid #22d3a0', boxShadow:'none' },
+            '.Label':       { color:'#8892aa', fontSize:'12px' },
+          }
+        }
+      });
+
+      paymentElement = elements.create('payment', {
+        layout: { type:'tabs', defaultCollapsed:false }
+      });
+      paymentElement.mount('#payment-element');
+
+      paymentElement.on('ready', function() { resolve(); });
+    });
+  }
 
   /* ── Step 1: On page load, call our Netlify Function to create a Stripe
         Customer + Subscription (instead of a one-off PaymentIntent like the
@@ -298,53 +358,27 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       }
 
       var data = await resp.json();
+      currentSubscriptionId = data.subscriptionId;
+      currentCustomerId     = data.customerId;
 
-      stripe   = Stripe(STRIPE_PUBLISHABLE_KEY);
-      elements = stripe.elements({
-        clientSecret: data.clientSecret,
-        appearance: {
-          theme: 'night',
-          variables: {
-            colorBackground:      '#1c2333',
-            colorText:            '#f0f2f8',
-            colorTextPlaceholder: '#8892aa',
-            colorPrimary:         '#22d3a0',
-            borderRadius:         '8px',
-            fontFamily:           'Inter, -apple-system, sans-serif',
-            fontSizeBase:         '14px',
-            spacingUnit:          '4px',
-          },
-          rules: {
-            '.Input':       { border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#1c2333' },
-            '.Input:focus': { border:'1px solid #22d3a0', boxShadow:'none' },
-            '.Label':       { color:'#8892aa', fontSize:'12px' },
-          }
-        }
-      });
+      await mountPaymentElement(data.clientSecret);
 
-      var paymentElement = elements.create('payment', {
-        layout: { type:'tabs', defaultCollapsed:false }
-      });
-      paymentElement.mount('#payment-element');
+      document.getElementById('loading-overlay').style.display = 'none';
+      document.getElementById('payment-element').style.display = '';
+      document.getElementById('pay-btn').style.display         = '';
+      document.getElementById('cancel-note').style.display     = '';
+      document.getElementById('secure-note').style.display     = '';
 
-      paymentElement.on('ready', function() {
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('payment-element').style.display = '';
-        document.getElementById('pay-btn').style.display         = '';
-        document.getElementById('cancel-note').style.display     = '';
-        document.getElementById('secure-note').style.display     = '';
-
-        // Meta Pixel - InitiateCheckout fires once the Stripe card form has
-        // actually rendered in front of the visitor. If the subscription call
-        // or Stripe fails, the form never renders and no event fires, which is
-        // correct: those visitors did not really initiate a checkout.
-        if (typeof fbq === 'function') {
-          fbq('track', 'InitiateCheckout', {
-            value: 999.00,
-            currency: 'USD'
-          });
-        }
-      });
+      // Meta Pixel - InitiateCheckout fires once the Stripe card form has
+      // actually rendered in front of the visitor. If the subscription call
+      // or Stripe fails, the form never renders and no event fires, which is
+      // correct: those visitors did not really initiate a checkout.
+      if (typeof fbq === 'function') {
+        fbq('track', 'InitiateCheckout', {
+          value: 999.00,
+          currency: 'USD'
+        });
+      }
 
     } catch(e) {
       console.error('initStripe error:', e);
@@ -364,6 +398,106 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     el.textContent = msg;
     el.style.display = 'block';
     el.className = isError ? '' : 'success';
+  }
+
+  function fmt(cents) { return '$' + (cents / 100).toFixed(2); }
+
+  /* Reflect a (possibly discounted) total across the order summary, the
+     pay button label, the discount line, and the billing disclosure text. */
+  function updateTotalsUI(todayTotalCents, discountCents, coupon) {
+    document.getElementById('total-val').textContent = fmt(todayTotalCents) + '/mo';
+    document.getElementById('btn-label').textContent  = 'Start Boost AI — ' + fmt(todayTotalCents) + '/mo →';
+
+    var row = document.getElementById('discount-row');
+    if (discountCents > 0) {
+      document.getElementById('discount-val').textContent = '-' + fmt(discountCents);
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+
+    // Billing disclosure: be explicit about whether the discount continues
+    // into future months, based on the coupon's Stripe-configured duration.
+    var note = document.getElementById('cancel-note');
+    if (!coupon) {
+      note.textContent = 'You\'ll be billed ' + fmt(todayTotalCents) + ' today, then ' + fmt(BASE_MONTHLY_CENTS) + ' every 30 days. Cancel anytime, no contract.';
+    } else if (coupon.duration === 'forever') {
+      note.textContent = 'You\'ll be billed ' + fmt(todayTotalCents) + ' today, then ' + fmt(todayTotalCents) + ' every 30 days. Cancel anytime, no contract.';
+    } else if (coupon.duration === 'repeating') {
+      note.textContent = 'You\'ll be billed ' + fmt(todayTotalCents) + ' today and for ' + coupon.durationInMonths + ' month(s), then ' + fmt(BASE_MONTHLY_CENTS) + ' every 30 days after. Cancel anytime, no contract.';
+    } else {
+      note.textContent = 'You\'ll be billed ' + fmt(todayTotalCents) + ' today, then ' + fmt(BASE_MONTHLY_CENTS) + ' every 30 days. Cancel anytime, no contract.';
+    }
+  }
+
+  /* ── Promo code: Apply / Remove ──────────────────────────────────
+     Unlike the $49 page, applying a coupon here recreates the
+     Subscription server-side (see apply-coupon-subscription.js for why)
+     and returns a brand-new clientSecret, so we remount the Payment
+     Element rather than calling elements.fetchUpdates(). ── */
+  async function handlePromo() {
+    var btn   = document.getElementById('promo-btn');
+    var input = document.getElementById('promoCode');
+    var msg   = document.getElementById('promo-message');
+
+    if (!currentCustomerId) {
+      msg.textContent = 'Payment form is still loading — try again in a moment.';
+      msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+      return;
+    }
+
+    var action = promoApplied ? 'remove' : 'apply';
+    var code   = input.value.trim();
+
+    if (action === 'apply' && !code) {
+      msg.textContent = 'Enter a code first.'; msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true; input.disabled = true;
+    btn.textContent = action === 'apply' ? 'Applying…' : 'Removing…';
+    msg.style.display = 'none';
+    setLoading(true); // guard against paying mid-swap while we remount the Payment Element
+
+    try {
+      var resp = await fetch('/.netlify/functions/apply-coupon-subscription', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          customerId:     currentCustomerId,
+          subscriptionId: currentSubscriptionId,
+          action:         action,
+          code:           code,
+        }),
+      });
+      var data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || (action === 'apply' ? 'Invalid code' : 'Could not remove code'));
+
+      currentSubscriptionId = data.subscriptionId;
+      await mountPaymentElement(data.clientSecret);
+      updateTotalsUI(data.todayTotalCents, data.discountCents, data.coupon);
+
+      if (action === 'apply') {
+        promoApplied    = true;
+        input.disabled  = true;
+        btn.textContent = 'Remove';
+        msg.textContent = 'Code "' + code + '" applied ✓';
+        msg.style.color = 'var(--teal)'; msg.style.display = 'block';
+      } else {
+        promoApplied    = false;
+        input.value     = '';
+        input.disabled  = false;
+        btn.textContent = 'Apply';
+        msg.style.display = 'none';
+      }
+    } catch (e) {
+      msg.textContent = e.message; msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
+      btn.textContent = promoApplied ? 'Remove' : 'Apply';
+      input.disabled = promoApplied;
+    }
+
+    btn.disabled = false;
+    setLoading(false);
   }
 
   /* ── Step 2: User clicks "Start Boost AI"
