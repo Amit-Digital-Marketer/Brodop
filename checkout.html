@@ -232,6 +232,15 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <div class="btn-spinner" id="btn-spinner" style="display:none;"></div>
     </button>
 
+    <!-- Shown INSTEAD of the card form + Pay button once a 100%-off promo
+         code (e.g. STARTUPLISBON) has been applied. No card details are
+         ever collected for a free order — clicking this calls
+         claim-free-audit.js, which never touches Stripe payments at all. -->
+    <button class="btn-pay" id="free-btn" style="display:none;" onclick="handleFreeAudit()">
+      <span id="free-btn-label">Get my free audit →</span>
+      <div class="btn-spinner" id="free-btn-spinner" style="display:none;"></div>
+    </button>
+
     <div class="secure-note" id="secure-note" style="display:none;">
       <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       Secure payment powered by <strong style="margin-left:3px;">Stripe</strong>
@@ -264,17 +273,17 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
   document.getElementById('city').value      = qp('city');
   document.getElementById('website').value   = qp('website');
 
-  var stripe, elements;
+  var stripe, elements, paymentElementInstance;
   var currentPaymentIntentId = null;   // set once create-payment-intent responds
   var promoApplied           = false;
-  var BASE_AMOUNT_CENTS      = 4900;   // must match netlify/functions create-payment-intent.js / apply-coupon.js
+  var appliedPromoCode       = '';     // the code string currently applied (used by the free-audit claim)
+  var isFreeCheckout         = false;  // true once a 100%-off code has been applied
+  var currentAmountCents     = 4900;   // authoritative amount, always sourced from the server's responses
+  var initiateCheckoutFired  = false;  // fire the Meta InitiateCheckout pixel event once, not on every remount
 
-  /* ── Step 1: On page load, call our Netlify Function to create a PaymentIntent
-        All lead fields are sent NOW and stored in Stripe metadata.
-        This means stripe-webhook.js can read them back when payment succeeds,
-        even if the browser closes before the thank-you redirect. ── */
-  async function initStripe() {
-    var payload = {
+  /* ── Collects the current lead fields from the form, for any endpoint that needs them ── */
+  function currentLeadPayload() {
+    return {
       email:     document.getElementById('email').value.trim(),
       firstName: document.getElementById('firstName').value.trim(),
       business:  document.getElementById('bizName').value.trim(),
@@ -282,12 +291,23 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       city:      document.getElementById('city').value.trim(),
       website:   document.getElementById('website').value.trim(),
     };
+  }
 
+  /* ── Step 1: On page load, call our Netlify Function to create a PaymentIntent
+        All lead fields are sent NOW and stored in Stripe metadata.
+        This means stripe-webhook.js can read them back when payment succeeds,
+        even if the browser closes before the thank-you redirect.
+
+        Also called again later if a 100%-off code that had been applied gets
+        removed — that earlier PaymentIntent was canceled by apply-coupon.js,
+        so a brand-new one (and a fresh Payment Element mount) is required to
+        go back to a paid checkout. ── */
+  async function initStripe() {
     try {
       var resp = await fetch('/.netlify/functions/create-payment-intent', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
+        body:    JSON.stringify(currentLeadPayload()),
       });
 
       if (!resp.ok) {
@@ -300,58 +320,75 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
 
       var data = await resp.json();
       currentPaymentIntentId = data.paymentIntentId;
+      currentAmountCents     = data.amount;
 
-      stripe   = Stripe(STRIPE_PUBLISHABLE_KEY);
-      elements = stripe.elements({
-        clientSecret: data.clientSecret,
-        appearance: {
-          theme: 'night',
-          variables: {
-            colorBackground:      '#1c2333',
-            colorText:            '#f0f2f8',
-            colorTextPlaceholder: '#8892aa',
-            colorPrimary:         '#22d3a0',
-            borderRadius:         '8px',
-            fontFamily:           'Inter, -apple-system, sans-serif',
-            fontSizeBase:         '14px',
-            spacingUnit:          '4px',
-          },
-          rules: {
-            '.Input':       { border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#1c2333' },
-            '.Input:focus': { border:'1px solid #22d3a0', boxShadow:'none' },
-            '.Label':       { color:'#8892aa', fontSize:'12px' },
-          }
-        }
-      });
+      document.getElementById('loading-overlay').style.display = '';
+      document.getElementById('loading-overlay').innerHTML =
+        '<div class="spinner"></div><span>Loading secure payment form…</span>';
 
-      var paymentElement = elements.create('payment', {
-        layout: { type:'tabs', defaultCollapsed:false }
-      });
-      paymentElement.mount('#payment-element');
-
-      paymentElement.on('ready', function() {
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('payment-element').style.display = '';
-        document.getElementById('pay-btn').style.display         = '';
-        document.getElementById('secure-note').style.display     = '';
-
-        // Meta Pixel - InitiateCheckout fires once the Stripe card form has
-        // actually rendered in front of the visitor. If the PaymentIntent call
-        // or Stripe fails, the form never renders and no event fires, which is
-        // correct: those visitors did not really initiate a checkout.
-        if (typeof fbq === 'function') {
-          fbq('track', 'InitiateCheckout', {
-            value: 49.00,
-            currency: 'USD'
-          });
-        }
-      });
+      mountPaymentElement(data.clientSecret);
 
     } catch(e) {
       console.error('initStripe error:', e);
       document.getElementById('loading-overlay').innerHTML =
         '<span style="color:#f09595">Network error. Please refresh and try again.</span>';
     }
+  }
+
+  /* Creates (or re-creates) the Stripe Elements instance + Payment Element
+     against a given clientSecret, and mounts it. Used both on first load
+     and any time a fresh PaymentIntent has to be created (e.g. after
+     removing a 100%-off code). */
+  function mountPaymentElement(clientSecret) {
+    if (!stripe) stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
+
+    if (paymentElementInstance) {
+      try { paymentElementInstance.unmount(); } catch(e) {}
+      paymentElementInstance = null;
+    }
+
+    elements = stripe.elements({
+      clientSecret: clientSecret,
+      appearance: {
+        theme: 'night',
+        variables: {
+          colorBackground:      '#1c2333',
+          colorText:            '#f0f2f8',
+          colorTextPlaceholder: '#8892aa',
+          colorPrimary:         '#22d3a0',
+          borderRadius:         '8px',
+          fontFamily:           'Inter, -apple-system, sans-serif',
+          fontSizeBase:         '14px',
+          spacingUnit:          '4px',
+        },
+        rules: {
+          '.Input':       { border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#1c2333' },
+          '.Input:focus': { border:'1px solid #22d3a0', boxShadow:'none' },
+          '.Label':       { color:'#8892aa', fontSize:'12px' },
+        }
+      }
+    });
+
+    paymentElementInstance = elements.create('payment', {
+      layout: { type:'tabs', defaultCollapsed:false }
+    });
+    paymentElementInstance.mount('#payment-element');
+
+    paymentElementInstance.on('ready', function() {
+      document.getElementById('loading-overlay').style.display = 'none';
+      showPaidUI();
+
+      // Meta Pixel - InitiateCheckout fires once the Stripe card form has
+      // actually rendered in front of the visitor, and only the first time
+      // (not on every remount caused by adding/removing a promo code).
+      if (!initiateCheckoutFired && typeof fbq === 'function') {
+        initiateCheckoutFired = true;
+        fbq('track', 'InitiateCheckout', {
+          value: 49.00,
+          currency: 'USD'
+        });
+      }
+    });
   }
 
   /* ── UI helpers ── */
@@ -367,10 +404,29 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     el.className = isError ? '' : 'success';
   }
 
+  /* Card form + Pay button (normal / discounted paid checkout) */
+  function showPaidUI() {
+    isFreeCheckout = false;
+    document.getElementById('payment-element').style.display = '';
+    document.getElementById('pay-btn').style.display         = '';
+    document.getElementById('free-btn').style.display        = 'none';
+    document.getElementById('secure-note').style.display     = '';
+  }
+
+  /* "Get my free audit" button, in place of the card form (100%-off codes) */
+  function showFreeUI() {
+    isFreeCheckout = true;
+    document.getElementById('loading-overlay').style.display = 'none';
+    document.getElementById('payment-element').style.display = 'none';
+    document.getElementById('pay-btn').style.display         = 'none';
+    document.getElementById('free-btn').style.display        = '';
+    document.getElementById('secure-note').style.display     = '';
+  }
+
   function fmt(cents) { return '$' + (cents / 100).toFixed(2); }
 
-  /* Reflect a (possibly discounted) total across the order summary,
-     the pay button label, and the discount line. */
+  /* Reflect a (possibly discounted, possibly free) total across the order
+     summary, the pay button label, and the discount line. */
   function updateTotalsUI(totalCents, discountCents) {
     document.getElementById('total-val').textContent = fmt(totalCents);
     document.getElementById('btn-label').textContent  = 'Pay ' + fmt(totalCents) + ' — get my audit →';
@@ -385,10 +441,20 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
 
   /* ── Promo code: Apply / Remove ──────────────────────────────────
      Calls apply-coupon.js, which validates the code against Stripe and
-     updates the PaymentIntent's amount server-side (the client never
-     computes or trusts its own discount math). After the amount changes
-     on the PaymentIntent, elements.fetchUpdates() refreshes the already
-     -mounted Payment Element to reflect the new amount without a remount. ── */
+     recalculates the order total server-side (the client never computes
+     or trusts its own discount math).
+
+     Two outcomes on Apply:
+       • Partial discount → apply-coupon.js updates the existing
+         PaymentIntent's amount; elements.fetchUpdates() refreshes the
+         already-mounted Payment Element to match, no remount needed.
+       • 100%-off (free)  → apply-coupon.js CANCELS the PaymentIntent
+         server-side and tells us `free: true`. We switch to the free-
+         audit UI; there is no PaymentIntent left to update or confirm.
+
+     On Remove, if the order had gone free, the PaymentIntent no longer
+     exists — apply-coupon.js tells us `needsNewPaymentIntent: true` and
+     we create + mount a fresh one via initStripe(). ── */
   async function handlePromo() {
     var btn   = document.getElementById('promo-btn');
     var input = document.getElementById('promoCode');
@@ -412,13 +478,23 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
         var data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Could not remove code');
 
-        await elements.fetchUpdates();
-        updateTotalsUI(data.newAmount, 0);
+        if (data.needsNewPaymentIntent) {
+          // The PaymentIntent was canceled earlier when a free code was
+          // applied — get a fresh one and remount the Payment Element.
+          await initStripe();
+          updateTotalsUI(currentAmountCents, 0);
+        } else {
+          await elements.fetchUpdates();
+          currentAmountCents = data.newAmount;
+          updateTotalsUI(data.newAmount, 0);
+          showPaidUI();
+        }
 
-        promoApplied  = false;
-        input.value   = '';
-        input.disabled = false;
-        btn.textContent = 'Apply';
+        promoApplied     = false;
+        appliedPromoCode = '';
+        input.value      = '';
+        input.disabled   = false;
+        btn.textContent  = 'Apply';
         msg.style.display = 'none';
       } catch (e) {
         msg.textContent = e.message; msg.style.color = 'var(--red-text)'; msg.style.display = 'block';
@@ -446,8 +522,20 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       var data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Invalid code');
 
-      await elements.fetchUpdates();
-      updateTotalsUI(data.newAmount, data.discountCents);
+      appliedPromoCode = code;
+
+      if (data.free) {
+        // 100%-off — server already canceled the PaymentIntent. Switch to
+        // the free-audit flow; nothing left to confirm with Stripe.
+        currentAmountCents = 0;
+        updateTotalsUI(0, data.discountCents);
+        showFreeUI();
+      } else {
+        await elements.fetchUpdates();
+        currentAmountCents = data.newAmount;
+        updateTotalsUI(data.newAmount, data.discountCents);
+        showPaidUI();
+      }
 
       promoApplied    = true;
       input.disabled  = true;
@@ -461,10 +549,14 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     btn.disabled = false;
   }
 
-  /* ── Step 2: User clicks Pay
+  /* ── Step 2 (paid path): User clicks Pay
         • Validate fields
         • confirmPayment → Stripe handles the card charge
-        • On success: Stripe redirects to /thank-you.html
+        • On success: Stripe redirects to /brodop-thank-you.html, appending
+          its own redirect_status=succeeded + payment_intent params. We
+          additionally pass the ACTUAL amount charged (currentAmountCents)
+          so the thank-you page can report the real value to Google Ads,
+          GA4, Meta and OpenAI instead of always assuming $49.
         • stripe-webhook.js fires Zap 2 (paymentStatus "Confirmed") server-side
           Note: Zap 1 (paymentStatus "Pending") already fired on the main page
           when the user clicked "Run My AI Audit" — Clay row exists before this point ── */
@@ -488,11 +580,15 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     setLoading(true);
     document.getElementById('payment-message').style.display = 'none';
 
-    /* Stripe payment confirmation — redirects to /thank-you.html on success */
+    var returnUrl = window.location.origin + '/brodop-thank-you.html'
+      + '?amount=' + encodeURIComponent(currentAmountCents)
+      + '&currency=USD';
+
+    /* Stripe payment confirmation — redirects to the thank-you page on success */
     var result = await stripe.confirmPayment({
       elements: elements,
       confirmParams: {
-        return_url: window.location.origin + '/brodop-thank-you.html',
+        return_url: returnUrl,
         payment_method_data: {
           billing_details: { name: firstName + ' ' + bizName, email: email }
         }
@@ -503,6 +599,77 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     if (result.error) {
       showMsg(result.error.message, true);
       setLoading(false);
+    }
+  }
+
+  /* ── Free path: User clicks "Get my free audit"
+        • Validate fields (same rules as the paid path)
+        • claim-free-audit.js re-validates the promo code server-side,
+          records the redemption, and fires the same Clay confirmation
+          pipeline stripe-webhook.js uses for paid orders.
+        • No Stripe PaymentIntent is ever created or confirmed for this
+          order — nothing to charge.
+        • Redirect to the thank-you page WITHOUT redirect_status=succeeded
+          (that param only ever comes from a genuine Stripe redirect), so
+          Google Ads / Meta / OpenAI do not record a paid conversion. ── */
+  async function handleFreeAudit() {
+    var firstName = document.getElementById('firstName').value.trim();
+    var bizName   = document.getElementById('bizName').value.trim();
+    var email     = document.getElementById('email').value.trim();
+    var phone     = document.getElementById('phone').value.trim();
+    var city      = document.getElementById('city').value.trim();
+    var website   = document.getElementById('website').value.trim();
+
+    if (!firstName || !bizName || !email) {
+      showMsg('Please fill in your name, business name, and email.', true);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showMsg('Please enter a valid email address.', true);
+      return;
+    }
+    if (!appliedPromoCode) {
+      showMsg('Please apply your promo code first.', true);
+      return;
+    }
+
+    var btn      = document.getElementById('free-btn');
+    var label    = document.getElementById('free-btn-label');
+    var spinner  = document.getElementById('free-btn-spinner');
+
+    btn.disabled = true;
+    label.style.display   = 'none';
+    spinner.style.display = '';
+    document.getElementById('payment-message').style.display = 'none';
+
+    try {
+      var resp = await fetch('/.netlify/functions/claim-free-audit', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          code:            appliedPromoCode,
+          paymentIntentId: currentPaymentIntentId,
+          firstName:       firstName,
+          business:        bizName,
+          email:           email,
+          phone:           phone,
+          city:            city,
+          website:         website,
+        }),
+      });
+      var data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Could not claim your free audit');
+
+      // Deliberately no redirect_status=succeeded here — this was never a
+      // paid order.
+      var params = new URLSearchParams({ free: '1', promo: appliedPromoCode, email: email });
+      window.location.href = '/brodop-thank-you.html?' + params.toString();
+
+    } catch (e) {
+      showMsg(e.message, true);
+      btn.disabled = false;
+      label.style.display   = '';
+      spinner.style.display = 'none';
     }
   }
 
