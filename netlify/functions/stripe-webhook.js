@@ -2,7 +2,9 @@
    netlify/functions/stripe-webhook.js
 
    Stripe calls this endpoint server-to-server when a payment clears.
-   It fires TWO Zapier webhooks that exactly mirror your original flow:
+   It fires the shared Clay/Zapier confirmation pipeline (see
+   lib/clay.js) — the SAME pipeline claim-free-audit.js uses for
+   100%-off orders that never touch Stripe at all:
 
      ZAP_LEAD_WEBHOOK     → Zap 1  (same hook the lander form fires)
                             Action: Clay "Find or Create Row" by email
@@ -12,6 +14,13 @@
                             Action: Clay "Find Row" by email →
                                     "Update Row" set paymentStatus = Confirmed
                             ★ This is what kicks off Clay enrichment & audit ★
+
+   PROMO REDEMPTION TRACKING (new):
+   If the PaymentIntent that just succeeded had a promo code applied
+   (metadata.promotionCodeId — set by apply-coupon.js), this records one
+   redemption against that code and deactivates it on Stripe if that push-
+   es it to its configured max_redemptions. See lib/promo-validate.js and
+   lib/promo-store.js for why this bookkeeping has to happen ourselves.
 
    NETLIFY ENV VARS REQUIRED (Site → Environment variables):
      STRIPE_SECRET_KEY      →  sk_live_xxxxxxxxxxxxxxxxxxxx
@@ -29,24 +38,8 @@
    ══════════════════════════════════════════════════════════════════ */
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-
-/* Server-side fetch to Zapier (unlike sendBeacon, this is guaranteed to complete) */
-async function fireZapier(url, payload, label) {
-  if (!url) {
-    console.warn(`[stripe-webhook] ${label} URL not set in env vars — skipping`);
-    return;
-  }
-  try {
-    const resp = await fetch(url, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-    });
-    console.log(`[stripe-webhook] ${label} → Zapier responded ${resp.status}`);
-  } catch (err) {
-    console.error(`[stripe-webhook] ${label} failed:`, err.message);
-  }
-}
+const { fireZapier, confirmAuditLead } = require('./lib/clay');
+const { recordAndMaybeDeactivate } = require('./lib/promo-validate');
 
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
@@ -94,27 +87,29 @@ exports.handler = async function(event) {
 
     console.log(`[stripe-webhook] ✓ Payment succeeded: ${lead.email} — $${(pi.amount_received/100).toFixed(2)} ${pi.currency.toUpperCase()}`);
 
-    /* ZAP 1 — update Clay row (same webhook as lander form, matched by email)
-       Clay: "Find or Create Row" where email = lead.email → update all fields */
-    await fireZapier(process.env.ZAP_LEAD_WEBHOOK, {
-      ...lead,
-      intent:        'audit',
-      paymentStatus: 'Pending',   /* Clay upsert — row already exists from form submit */
-      submittedAt:   new Date(pi.created * 1000).toISOString(),
-    }, 'Zap1-Lead');
+    /* If a promo code was applied to this order (e.g. FRIENDS20), record
+       the redemption and deactivate the code on Stripe if this pushes it
+       to its limit. This never runs for 100%-off codes — those never
+       reach this webhook at all, since no PaymentIntent is ever confirmed
+       for them (see claim-free-audit.js, which does its own tracking). */
+    if (m.promotionCodeId) {
+      try {
+        const promo = await stripe.promotionCodes.retrieve(m.promotionCodeId);
+        await recordAndMaybeDeactivate(stripe, event, promo, pi.id);
+      } catch (err) {
+        console.error('[stripe-webhook] Promo redemption tracking failed:', err.message);
+      }
+    }
 
-    /* ZAP 2 — payment confirmed trigger (replaces "Checkout Session Completed")
-       Clay: "Find Row" where email = lead.email → "Update Row" paymentStatus = Confirmed
-       ★ This status change is what kicks off Clay enrichment and the audit pipeline ★ */
-    await fireZapier(process.env.ZAP_CONFIRM_WEBHOOK, {
-      ...lead,
-      intent:          'audit',
-      paymentStatus:   'Confirmed',        /* ← Clay watches this field to trigger enrichment */
+    /* Fire the shared Clay/Zapier confirmation pipeline — same one
+       claim-free-audit.js uses for $0 orders. */
+    await confirmAuditLead(lead, {
       amountPaid:      (pi.amount_received / 100).toFixed(2),
       currency:        pi.currency.toUpperCase(),
-      stripePaymentId: pi.id,              /* useful reference for receipts / Clay record */
+      stripePaymentId: pi.id,
+      promoCode:       m.promoCode || '',
       paidAt:          new Date(pi.created * 1000).toISOString(),
-    }, 'Zap2-Confirm');
+    });
   }
 
   /* ── PAYMENT FAILED ──────────────────────────────────────────── */
