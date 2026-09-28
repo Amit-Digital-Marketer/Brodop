@@ -13,16 +13,38 @@
    this function does:
 
      action "apply"  → looks up the Stripe Promotion Code by its human
-                        -readable code (e.g. "FRIENDS20"), recalculates
-                        the order total server-side (never trust a
-                        client-sent discount), and updates the existing
-                        PaymentIntent's amount + metadata.
-     action "remove" → resets the PaymentIntent back to the base $49.
+                        -readable code (e.g. "FRIENDS20"), re-validates
+                        it (redemption limit included — see lib/promo-
+                        validate.js) and recalculates the order total
+                        server-side (never trust a client-sent discount).
+
+                        • Partial discount (e.g. FRIENDS20) → updates the
+                          existing PaymentIntent's amount + metadata, same
+                          as before.
+                        • 100%-off discount (e.g. STARTUPLISBON) → the
+                          order is now $0. Stripe will not accept a $0
+                          PaymentIntent amount, and per spec we must not
+                          create/confirm a PaymentIntent for a free order
+                          at all — so instead this CANCELS the existing
+                          PaymentIntent and tells the client the order is
+                          free. The client then hides the card form and
+                          shows "Get my free audit", which is claimed via
+                          claim-free-audit.js (a completely separate,
+                          non-Stripe-payment code path).
+
+     action "remove" → resets the PaymentIntent back to the base amount.
+                        If the PaymentIntent was canceled (because a
+                        100%-off code had been applied), there is nothing
+                        left to reset — this returns needsNewPaymentIntent:
+                        true so the client creates a fresh PaymentIntent
+                        via create-payment-intent.js instead.
 
    The Payment Element is already mounted client-side against this
    PaymentIntent's clientSecret. After this function updates the
-   amount, the client calls elements.fetchUpdates() to pull the new
-   amount into the already-mounted Payment Element — no remount needed.
+   amount (partial-discount case), the client calls elements.fetchUpdates()
+   to pull the new amount into the already-mounted Payment Element — no
+   remount needed. The free case and the "PI was canceled" remove case
+   both require a full remount against a new clientSecret instead.
 
    NETLIFY ENV VARS REQUIRED (Site → Environment variables):
      STRIPE_SECRET_KEY  →  sk_live_xxxxxxxxxxxxxxxxxxxx
@@ -30,10 +52,8 @@
    ══════════════════════════════════════════════════════════════════ */
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-
-const BASE_AMOUNT = 4900;   // $49.00 in cents — MUST match create-payment-intent.js
-const CURRENCY    = 'usd';
-const MIN_CHARGE  = 50;     // Stripe's practical minimum chargeable amount for USD
+const { BASE_AMOUNT, CURRENCY } = require('./lib/constants');
+const { validatePromoCode } = require('./lib/promo-validate');
 
 exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') {
@@ -54,52 +74,60 @@ exports.handler = async function (event) {
   try {
     /* ── REMOVE: reset back to full price ─────────────────────────── */
     if (action === 'remove') {
-      const updated = await stripe.paymentIntents.update(paymentIntentId, {
-        amount: BASE_AMOUNT,
-        metadata: { promoCode: '', promotionCodeId: '', promoDiscountCents: '' },
-      });
-      return json(200, { newAmount: updated.amount, discountCents: 0, currency: CURRENCY });
+      try {
+        const updated = await stripe.paymentIntents.update(paymentIntentId, {
+          amount: BASE_AMOUNT,
+          metadata: { promoCode: '', promotionCodeId: '', promoDiscountCents: '' },
+        });
+        return json(200, { newAmount: updated.amount, discountCents: 0, currency: CURRENCY });
+      } catch (err) {
+        // If a 100%-off code was applied earlier, this PaymentIntent was
+        // CANCELED (see the "apply" branch below) — there's nothing left
+        // to reset. Tell the client to get a brand-new PaymentIntent.
+        if (isCanceledPaymentIntentError(err)) {
+          return json(200, { needsNewPaymentIntent: true, discountCents: 0, currency: CURRENCY });
+        }
+        throw err;
+      }
     }
 
     /* ── APPLY: look up the promo code, compute discount ──────────── */
-    if (!code) {
-      return json(400, { error: 'Enter a promo code' });
+    const validation = await validatePromoCode(stripe, event, code, BASE_AMOUNT);
+
+    if (!validation.ok) {
+      return json(validation.status, { error: validation.error });
     }
 
-    const list  = await stripe.promotionCodes.list({ code: code, active: true, limit: 1 });
-    const promo = list.data[0];
+    const { promo, newAmount, discountCents, coupon } = validation;
 
-    if (!promo) {
-      return json(400, { error: 'Invalid or expired code' });
+    /* 100%-off → this order is free. Do NOT create/confirm a Stripe
+       PaymentIntent for $0 — cancel the placeholder one instead. The
+       client switches to the free-audit flow (claim-free-audit.js),
+       which re-validates this same code server-side before granting
+       anything. */
+    if (newAmount === 0) {
+      try {
+        await stripe.paymentIntents.cancel(paymentIntentId);
+      } catch (err) {
+        // Already canceled/succeeded is fine to ignore here — we're about
+        // to tell the client this is a free order either way. Anything
+        // else, surface it.
+        if (!isCanceledPaymentIntentError(err)) {
+          console.error('apply-coupon: failed to cancel PaymentIntent for free order:', err.message);
+        }
+      }
+
+      return json(200, {
+        free: true,
+        newAmount: 0,
+        discountCents: discountCents,
+        currency: CURRENCY,
+        promotionCodeId: promo.id,
+        code: code,
+      });
     }
 
-    const coupon = promo.coupon;
-
-    if (!coupon || coupon.valid === false) {
-      return json(400, { error: 'This code is no longer valid' });
-    }
-
-    // amount_off coupons carry a currency — reject if it doesn't match this order
-    if (coupon.amount_off && coupon.currency && coupon.currency !== CURRENCY) {
-      return json(400, { error: 'This code is not valid for this order' });
-    }
-
-    // Minimum order amount restriction configured on the promotion code
-    if (promo.restrictions && promo.restrictions.minimum_amount &&
-        BASE_AMOUNT < promo.restrictions.minimum_amount) {
-      return json(400, { error: 'This order does not meet the minimum amount for this code' });
-    }
-
-    let discountCents = 0;
-    if (coupon.percent_off) {
-      discountCents = Math.round(BASE_AMOUNT * (coupon.percent_off / 100));
-    } else if (coupon.amount_off) {
-      discountCents = coupon.amount_off;
-    }
-
-    let newAmount = Math.max(MIN_CHARGE, BASE_AMOUNT - discountCents);
-    discountCents = BASE_AMOUNT - newAmount; // re-derive in case of clamping at MIN_CHARGE
-
+    /* Partial discount → update the existing PaymentIntent's amount, same as before */
     const updated = await stripe.paymentIntents.update(paymentIntentId, {
       amount: newAmount,
       metadata: {
@@ -110,6 +138,7 @@ exports.handler = async function (event) {
     });
 
     return json(200, {
+      free:          false,
       newAmount:     updated.amount,
       discountCents: discountCents,
       currency:      CURRENCY,
@@ -122,6 +151,14 @@ exports.handler = async function (event) {
     return json(500, { error: err.message });
   }
 };
+
+/** True if a Stripe error is "you can't update/act on a canceled PaymentIntent". */
+function isCanceledPaymentIntentError(err) {
+  if (!err) return false;
+  if (err.code === 'payment_intent_unexpected_state') return true;
+  const msg = err.message || '';
+  return msg.indexOf('canceled') !== -1 || msg.indexOf('cancelled') !== -1;
+}
 
 function json(statusCode, data) {
   return {
