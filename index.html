@@ -155,6 +155,11 @@ fbq('track', 'PageView');
   .hero .micro{font-size:.92rem;color:var(--text-dim);margin-bottom:30px;}
 
   .hero-cta-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  /* quiet secondary link beside the main hero button */
+  .hero-link{color:var(--text-mid);font-weight:600;font-size:1rem;text-decoration:none;padding:10px 6px;transition:color .15s;}
+  .hero-link:hover{color:var(--accent);}
+  .hero-link:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px;}
+  @media(max-width:600px){.hero-link{width:100%;text-align:center;}}
   .hero-trust{display:flex;align-items:center;gap:14px;margin-top:26px;font-size:.86rem;color:var(--text-dim);}
   .hero-trust .stars{color:var(--gold);letter-spacing:2px;font-size:.95rem;}
   .hero-trust .divider{width:1px;height:16px;background:var(--line);}
@@ -178,6 +183,14 @@ fbq('track', 'PageView');
   .check-head .live .pulse{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.8s infinite;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.5);}70%{box-shadow:0 0 0 8px rgba(52,211,153,0);}100%{box-shadow:0 0 0 0 rgba(52,211,153,0);}}
   .check-card h3{font-size:1.4rem;margin-bottom:4px;}
+
+  /* hero video: same bordered panel as the old form card, thinner padding so the video fills it */
+  .check-card.video-card{padding:10px;}
+  .video-frame{
+    position:relative;width:100%;aspect-ratio:16/9;
+    border-radius:16px;overflow:hidden;background:#000;
+  }
+  .video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
   .check-card .check-desc{font-size:.92rem;color:var(--text-mid);margin-bottom:20px;}
 
   .field{margin-bottom:13px;}
@@ -634,7 +647,7 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <a href="#how">How It Works</a>
       <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
-      <a href="#signup" class="btn btn-primary nav-cta">Get My Score</a>
+      <a href="#signup" class="btn btn-primary nav-cta" onclick="return openAuditModal(event)">Get My Score</a>
     </div>
   </div>
 </nav>
@@ -649,7 +662,8 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <p class="sub">When a customer asks ChatGPT, Gemini or Perplexity to recommend a business like yours, do you come up? Or does your competitor?</p>
       <p class="micro">The BroDop BiAS Instant AI Score gives you the honest answer.</p>
       <div class="hero-cta-row">
-        <a href="#how" class="btn btn-primary btn-lg">See How It Works</a>
+        <button type="button" class="btn btn-primary btn-lg" onclick="openAuditModal()">Run My AI Audit — $49 →</button>
+        <a href="#how" class="hero-link">See How It Works</a>
       </div>
       <div class="hero-trust">
         <span class="stars">★★★★★</span>
@@ -659,49 +673,17 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       </div>
     </div>
 
-    <!-- AUDIT SIGNUP FORM -->
-    <div class="check-card" id="signup" style="scroll-margin-top:90px;">
-      <div class="check-head">
-        <span class="signup-price">$49 · one-time</span>
-      </div>
-      <h3>Run my AI Visibility Audit</h3>
-      <p class="check-desc">Your full AI Visibility Audit lands within 1 hour.</p>
-      <div class="form-row">
-        <div class="field">
-          <label for="fName">First Name</label>
-          <input type="text" id="fName" placeholder="Jordan" required />
-        </div>
-        <div class="field">
-          <label for="fBiz">Business Name</label>
-          <input type="text" id="fBiz" placeholder="Summit Roofing Co." required />
-        </div>
-      </div>
-      <div class="field">
-        <label for="fUrl">Website URL</label>
-        <input type="url" id="fUrl" placeholder="https://yourbusiness.com" required />
-      </div>
-      <div class="field">
-        <label for="fCity">Where is your business located?</label>
-        <input type="text" id="fCity" placeholder="City" required />
-        <span class="field-hint">If you have multiple locations, enter the city of your main or flagship location.</span>
-      </div>
-      <div class="form-row">
-        <div class="field">
-          <label for="fPhone">Phone Number</label>
-          <input type="tel" id="fPhone" placeholder="(555) 555-0100" required />
-        </div>
-        <div class="field">
-          <label for="fEmail">Email Address</label>
-          <input type="email" id="fEmail" placeholder="you@yourbusiness.com" required />
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="goToCheckout()">Run My AI Audit — $49 →</button>
-      <div class="signup-reassure">
-        <span><span class="sr-ck">✓</span> Comprehensive audit, not a quiz</span>
-        <span><span class="sr-ck">✓</span> Delivered in 1 hr</span>
-      </div>
-      <div class="stripe-badge" style="margin-top:14px;">
-        <span>🔒</span><span>SECURE CHECKOUT VIA</span><strong style="color:var(--text-mid);">Stripe</strong>
+    <!-- HERO VIDEO (Wistia: "VSL 2 video", media jx6u62123w, 35s, 16:9).
+         The $49 audit form now lives in the #auditModal popup below. -->
+    <div class="check-card video-card">
+      <div class="video-frame">
+        <iframe
+          src="https://fast.wistia.net/embed/iframe/jx6u62123w?playerColor=3FE0C5"
+          title="A message from Mark at BroDop"
+          allow="autoplay; fullscreen"
+          allowfullscreen
+          frameborder="0"
+          scrolling="no"></iframe>
       </div>
     </div>
   </div>
@@ -774,7 +756,7 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
           <li><span class="fk">✓</span> A detailed breakdown of why you're not ranking</li>
           <li><span class="star">★</span> Delivered within 1 hour</li>
         </ul>
-        <a href="#signup" class="btn btn-primary btn-lg">Run My AI Audit — $49 →</a>
+        <a href="#signup" class="btn btn-primary btn-lg" onclick="return openAuditModal(event)">Run My AI Audit — $49 →</a>
         <p class="tier-nudge">Already know you want the fix? Start Boost AI instead and the audit's on us.</p>
       </div>
 
@@ -984,7 +966,7 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
   <div class="wrap" style="position:relative;z-index:2;">
     <h2>Stop guessing what AI says <span class="hl">about you.</span></h2>
     <p>Forty-nine dollars. One hour. One honest answer that could change how you show up to every customer searching with AI.</p>
-    <a href="#signup" class="btn btn-primary btn-lg">Run My AI Audit — $49</a>
+    <a href="#signup" class="btn btn-primary btn-lg" onclick="return openAuditModal(event)">Run My AI Audit — $49</a>
   </div>
 </section>
 
@@ -1117,21 +1099,48 @@ function goToCheckout() {
   }, {threshold:.12});
   document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
 
-  /* ---------- Boost AI modal ---------- */
-  function openBoostModal(){
-    document.getElementById('boostModal').classList.add('open');
+  /* ---------- Popups ($49 audit + Boost AI) ---------- */
+  function openModal(id){
+    document.getElementById(id).classList.add('open');
     document.body.style.overflow = 'hidden';
   }
-  function closeBoostModal(){
-    document.getElementById('boostModal').classList.remove('open');
+  function closeModal(id){
+    document.getElementById(id).classList.remove('open');
     document.body.style.overflow = '';
   }
-  function handleModalOverlayClick(e){
-    if(e.target === document.getElementById('boostModal')){ closeBoostModal(); }
+
+  /* $49 audit popup. Called by the hero button, nav, pricing card and final CTA.
+     Accepts the click event so the old #signup links do not jump the page. */
+  function openAuditModal(e){
+    if(e && e.preventDefault){ e.preventDefault(); }
+    openModal('auditModal');
+    /* On desktop, put the cursor in the first field. Skipped on touch screens
+       so the keyboard doesn't pop up the instant the popup opens. */
+    if(window.matchMedia && window.matchMedia('(pointer:fine)').matches){
+      setTimeout(function(){ document.getElementById('fName').focus(); }, 280);
+    }
+    return false;
   }
+  function closeAuditModal(){ closeModal('auditModal'); }
+
+  function openBoostModal(){ openModal('boostModal'); }
+  function closeBoostModal(){ closeModal('boostModal'); }
+
+  /* Clicking the dark backdrop closes whichever popup it belongs to */
+  function handleModalOverlayClick(e){
+    if(e.target === e.currentTarget){ closeModal(e.currentTarget.id); }
+  }
+  /* Escape closes any open popup */
   document.addEventListener('keydown', function(e){
-    if(e.key === 'Escape'){ closeBoostModal(); }
+    if(e.key === 'Escape'){
+      document.querySelectorAll('.modal-overlay.open').forEach(function(m){ closeModal(m.id); });
+    }
   });
+
+  /* Old links and ads that point to bias.brodop.ai/#signup open the audit popup */
+  if(window.location.hash === '#signup'){
+    window.addEventListener('load', function(){ openAuditModal(); });
+  }
   /*function submitBoostModal(){
     var data = {
       firstName: document.getElementById('mName').value.trim(),
@@ -1188,6 +1197,56 @@ function goToCheckout() {
   }
   
 </script>
+
+<!-- ========== $49 AUDIT MODAL ==========
+     Moved here from the hero, which now shows the video.
+     Field IDs (fName, fBiz, fUrl, fCity, fPhone, fEmail) are unchanged,
+     so goToCheckout() and the Zapier lead capture work exactly as before. -->
+<div class="modal-overlay" id="auditModal" onclick="handleModalOverlayClick(event)" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+  <div class="modal-card">
+    <button class="modal-close" onclick="closeAuditModal()" aria-label="Close">✕</button>
+    <div class="modal-tag">// $49 · one-time</div>
+    <h2 id="auditModalTitle">Run my AI Visibility Audit</h2>
+    <p class="modal-sub" style="margin-bottom:20px;">Your full AI Visibility Audit lands within 1 hour.</p>
+    <div class="form-row">
+      <div class="field">
+        <label for="fName">First Name</label>
+        <input type="text" id="fName" placeholder="Jordan" required />
+      </div>
+      <div class="field">
+        <label for="fBiz">Business Name</label>
+        <input type="text" id="fBiz" placeholder="Summit Roofing Co." required />
+      </div>
+    </div>
+    <div class="field">
+      <label for="fUrl">Website URL</label>
+      <input type="url" id="fUrl" placeholder="https://yourbusiness.com" required />
+    </div>
+    <div class="field">
+      <label for="fCity">Where is your business located?</label>
+      <input type="text" id="fCity" placeholder="City" required />
+      <span class="field-hint">If you have multiple locations, enter the city of your main or flagship location.</span>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="fPhone">Phone Number</label>
+        <input type="tel" id="fPhone" placeholder="(555) 555-0100" required />
+      </div>
+      <div class="field">
+        <label for="fEmail">Email Address</label>
+        <input type="email" id="fEmail" placeholder="you@yourbusiness.com" required />
+      </div>
+    </div>
+    <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;margin-top:6px;" onclick="goToCheckout()">Run My AI Audit — $49 →</button>
+    <div class="modal-reassure">
+      <span><span class="sr-ck">✓</span> Comprehensive audit, not a quiz</span>
+      <span><span class="sr-ck">✓</span> Delivered in 1 hr</span>
+    </div>
+    <div class="modal-stripe">
+      <span>🔒</span><span>SECURE CHECKOUT VIA</span><strong style="color:var(--text-mid);">Stripe</strong>
+    </div>
+  </div>
+</div>
 
 <!-- ========== BOOST AI MODAL ========== -->
 <div class="modal-overlay" id="boostModal" onclick="handleModalOverlayClick(event)">
