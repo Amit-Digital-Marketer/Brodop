@@ -35,9 +35,35 @@ const { getStore, connectLambda } = require('@netlify/blobs');
 
 const STORE_NAME = 'promo-redemptions';
 
+/* Blobs configuration
+   -------------------
+   Classic Lambda-compatible handlers (`exports.handler = async (event)`)
+   get their Blobs environment from `connectLambda(event)`. In that mode
+   Netlify does NOT provide an `uncachedEdgeURL`, so requesting
+   `consistency: 'strong'` throws:
+     "Netlify Blobs has failed to perform a read using strong consistency
+      because the environment has not been configured with a
+      'uncachedEdgeURL' property"
+   So by default we use the default (eventual) consistency, which works
+   everywhere with zero config.
+
+   OPTIONAL HARDENING (recommended if you run limited promo codes):
+   set BLOBS_SITE_ID and BLOBS_TOKEN in Netlify env vars. The store then
+   talks to the Blobs API directly, where reads are always strongly
+   consistent, so a redemption limit can't be overshot by a stale read.
+     BLOBS_SITE_ID → Site configuration → Site ID
+     BLOBS_TOKEN   → a Netlify Personal Access Token
+*/
 function store(event) {
+  const siteID = process.env.BLOBS_SITE_ID;
+  const token  = process.env.BLOBS_TOKEN;
+
+  if (siteID && token) {
+    return getStore({ name: STORE_NAME, siteID, token, consistency: 'strong' });
+  }
+
   if (event) connectLambda(event);
-  return getStore({ name: STORE_NAME, consistency: 'strong' });
+  return getStore({ name: STORE_NAME });
 }
 
 function counterKey(promotionCodeId) {

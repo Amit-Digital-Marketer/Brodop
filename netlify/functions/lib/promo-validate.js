@@ -63,7 +63,11 @@ async function validatePromoCode(stripe, event, code, baseAmount) {
   // COUNT for this hand-built-PaymentIntent flow, so the count comes from
   // our own server-side tracker.
   if (typeof promo.max_redemptions === 'number') {
-    const used = await getRedemptionCount(event, promo.id);
+    // Stripe's own times_redeemed covers redemptions Stripe tracks natively
+    // (subscription discounts — the Boost AI flow). Our tracker covers the
+    // ones Stripe can't see (free claims, manual PaymentIntent discounts).
+    // The two never overlap, so the total is simply their sum.
+    const used = (promo.times_redeemed || 0) + await getRedemptionCount(event, promo.id);
     if (used >= promo.max_redemptions) {
       // Belt-and-suspenders: make sure Stripe agrees it's dead, in case an
       // earlier deactivation attempt failed (network blip, etc).
@@ -103,7 +107,8 @@ async function deactivateIfNeeded(stripe, promo) {
  */
 async function recordAndMaybeDeactivate(stripe, event, promo, idempotencyKey) {
   const { count } = await recordRedemption(event, promo.id, idempotencyKey);
-  if (typeof promo.max_redemptions === 'number' && count >= promo.max_redemptions) {
+  if (typeof promo.max_redemptions === 'number' &&
+      (promo.times_redeemed || 0) + count >= promo.max_redemptions) {
     await deactivateIfNeeded(stripe, promo);
   }
   return count;

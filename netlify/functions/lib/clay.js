@@ -42,39 +42,57 @@ async function fireZapier(url, payload, label) {
 }
 
 /**
- * Fires both Clay Zaps for a confirmed audit purchase — paid OR free.
+ * Fires both Clay Zaps for a confirmed purchase — paid OR free, audit OR boost.
  *
  * @param {object} lead - { firstName, business, email, phone, city, website }
  * @param {object} extra
- * @param {string} extra.amountPaid       - e.g. '49.00' or '0.00'
- * @param {string} extra.currency         - e.g. 'USD'
- * @param {string|null} extra.stripePaymentId - PaymentIntent id, or null for free orders
- * @param {string} [extra.promoCode]      - promo code used, if any
- * @param {string} extra.paidAt           - ISO timestamp
+ * @param {string} [extra.intent]   - 'audit' (default) or 'boost'
+ * @param {string} extra.amountPaid - e.g. '49.00' or '0.00'
+ * @param {string} extra.currency   - e.g. 'USD'
+ * @param {string} [extra.promoCode]
+ * @param {string} extra.paidAt     - ISO timestamp
+ * @param {object} [extra.fields]   - extra product-specific keys merged into the
+ *                                    Confirm payload (e.g. stripePaymentId,
+ *                                    stripeSubscriptionId)
  */
-async function confirmAuditLead(lead, extra) {
+async function confirmLead(lead, extra) {
+  const intent = extra.intent || 'audit';
+  const tag = intent === 'boost' ? '-Boost' : '';
+
   // ZAP 1 — upsert Clay row (mirrors the lander form's own Zap 1 call;
   // this is an idempotent "Find or Create Row by email" on the Clay side)
   await fireZapier(process.env.ZAP_LEAD_WEBHOOK, {
     ...lead,
-    intent: 'audit',
+    intent,
     paymentStatus: 'Pending',
     submittedAt: extra.paidAt,
-  }, 'Zap1-Lead');
+  }, 'Zap1-Lead' + tag);
 
   // ZAP 2 — payment confirmed trigger. Clay watches this field to kick off
-  // enrichment + the audit pipeline — same trigger whether the order was
-  // paid or fully comped by a 100%-off promo code.
+  // enrichment + delivery — same trigger whether the order was paid or
+  // fully comped by a 100%-off promo code.
   await fireZapier(process.env.ZAP_CONFIRM_WEBHOOK, {
     ...lead,
-    intent: 'audit',
+    intent,
     paymentStatus: 'Confirmed',
     amountPaid: extra.amountPaid,
     currency: extra.currency,
-    stripePaymentId: extra.stripePaymentId,
     promoCode: extra.promoCode || '',
     paidAt: extra.paidAt,
-  }, 'Zap2-Confirm');
+    ...(extra.fields || {}),
+  }, 'Zap2-Confirm' + tag);
 }
 
-module.exports = { fireZapier, confirmAuditLead };
+/** $49 audit wrapper — keeps the original call signature used by stripe-webhook.js */
+async function confirmAuditLead(lead, extra) {
+  return confirmLead(lead, {
+    intent: 'audit',
+    amountPaid: extra.amountPaid,
+    currency: extra.currency,
+    promoCode: extra.promoCode,
+    paidAt: extra.paidAt,
+    fields: { stripePaymentId: extra.stripePaymentId },
+  });
+}
+
+module.exports = { fireZapier, confirmLead, confirmAuditLead };
