@@ -48,23 +48,8 @@
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
-/* Server-side fetch to Zapier (unlike sendBeacon, this is guaranteed to complete) */
-async function fireZapier(url, payload, label) {
-  if (!url) {
-    console.warn(`[stripe-boost-webhook] ${label} URL not set in env vars — skipping`);
-    return;
-  }
-  try {
-    const resp = await fetch(url, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-    });
-    console.log(`[stripe-boost-webhook] ${label} → Zapier responded ${resp.status}`);
-  } catch (err) {
-    console.error(`[stripe-boost-webhook] ${label} failed:`, err.message);
-  }
-}
+/* fireZapier is shared with the $49 flow and the free-claim functions (lib/clay.js) */
+const { fireZapier } = require('./lib/clay');
 
 /* Rebuild lead fields from the Customer record (metadata stamped in
    create-subscription.js at checkout time). Falls back to blanks if the

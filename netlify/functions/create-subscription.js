@@ -144,6 +144,9 @@ exports.handler = async function (event) {
         clientSecret:   clientSecret,
         subscriptionId: subscription.id,
         customerId:     customer.id,
+        // Real amount due on the first invoice (differs from the base price if
+        // a reused incomplete subscription already carries a discount).
+        todayTotalCents: subscription.latest_invoice ? subscription.latest_invoice.amount_due : null,
       }),
     };
 

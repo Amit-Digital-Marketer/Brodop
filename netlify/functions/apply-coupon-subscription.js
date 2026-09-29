@@ -40,6 +40,17 @@
    action "remove" does the same cancel + recreate, just without a
    discount attached, to cleanly restore full price.
 
+   FREE (100%-off) CODES: if the code brings today's total to $0, Stripe
+   would create an "active" $0 subscription with no PaymentIntent and no
+   card on file (which would then fail to renew). So instead this function
+   cancels the incomplete subscription, creates NOTHING, and returns
+   free:true. checkout-boost.html then shows "Get my free Boost AI", which
+   calls claim-free-boost.js. Removing the code afterwards simply creates
+   a fresh subscription via the normal "remove" path below.
+
+   Redemption limits: validated via lib/promo-validate.js (Stripe's native
+   times_redeemed + our own free-claim tracker).
+
    This never touches the Stripe Customer record (name/email/metadata),
    which is what stripe-boost-webhook.js reads lead info from — so the
    Zapier/Clay pipeline is completely unaffected by any of this.
@@ -50,6 +61,7 @@
    ══════════════════════════════════════════════════════════════════ */
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { validatePromoCode } = require('./lib/promo-validate');
 
 function extractClientSecret(subscription) {
   const invoice = subscription.latest_invoice;
@@ -86,17 +98,19 @@ exports.handler = async function (event) {
     let promotionCodeId = null;
     let couponSummary    = null;
 
+    /* Authoritative base price from Stripe (never trust the client) */
+    const price = await stripe.prices.retrieve(priceId);
+    const baseCentsFromPrice = price.unit_amount;
+
     if (action === 'apply') {
       if (!code) return json(400, { error: 'Enter a promo code' });
 
-      const list  = await stripe.promotionCodes.list({ code: code, active: true, limit: 1 });
-      const promo = list.data[0];
-      if (!promo) return json(400, { error: 'Invalid or expired code' });
+      // Shared validation: active, valid, currency/minimum, redemption limit
+      const validation = await validatePromoCode(stripe, event, code, baseCentsFromPrice);
+      if (!validation.ok) return json(validation.status, { error: validation.error });
 
-      const coupon = promo.coupon;
-      if (!coupon || coupon.valid === false) {
-        return json(400, { error: 'This code is no longer valid' });
-      }
+      const promo  = validation.promo;
+      const coupon = validation.coupon;
 
       promotionCodeId = promo.id;
       couponSummary = {
@@ -105,20 +119,26 @@ exports.handler = async function (event) {
         duration:         coupon.duration,               // 'once' | 'repeating' | 'forever'
         durationInMonths: coupon.duration_in_months || null,
       };
+
+      /* 100%-off → free flow. Cancel the incomplete subscription and create
+         nothing; the client switches to "Get my free Boost AI". */
+      if (validation.newAmount === 0) {
+        await cancelIncompleteSubscription(oldSubscriptionId);
+        return json(200, {
+          free:            true,
+          todayTotalCents: 0,
+          baseCents:       baseCentsFromPrice,
+          discountCents:   baseCentsFromPrice,
+          coupon:          couponSummary,
+          promotionCodeId: promo.id,
+          code:            code,
+        });
+      }
     }
 
     /* ── Cancel the existing incomplete subscription. Stripe auto-voids
           its unpaid first invoice, so nothing is left dangling. ── */
-    if (oldSubscriptionId) {
-      try {
-        const existing = await stripe.subscriptions.retrieve(oldSubscriptionId);
-        if (existing.status === 'incomplete') {
-          await stripe.subscriptions.cancel(oldSubscriptionId);
-        }
-      } catch (e) {
-        console.warn('[apply-coupon-subscription] Could not cancel old subscription (may already be gone):', e.message);
-      }
-    }
+    await cancelIncompleteSubscription(oldSubscriptionId);
 
     /* ── Create the replacement subscription, discounted or not ── */
     const createParams = {
@@ -150,6 +170,7 @@ exports.handler = async function (event) {
     const discountCents    = Math.max(0, baseCents - todayTotalCents);
 
     return json(200, {
+      free:            false,
       clientSecret:    clientSecret,
       subscriptionId:  subscription.id,
       todayTotalCents: todayTotalCents,
@@ -163,6 +184,18 @@ exports.handler = async function (event) {
     return json(500, { error: err.message });
   }
 };
+
+async function cancelIncompleteSubscription(subscriptionId) {
+  if (!subscriptionId) return;
+  try {
+    const existing = await stripe.subscriptions.retrieve(subscriptionId);
+    if (existing.status === 'incomplete') {
+      await stripe.subscriptions.cancel(subscriptionId);
+    }
+  } catch (e) {
+    console.warn('[apply-coupon-subscription] Could not cancel old subscription (may already be gone):', e.message);
+  }
+}
 
 function json(statusCode, data) {
   return {
