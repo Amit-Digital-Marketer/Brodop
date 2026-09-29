@@ -240,6 +240,14 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       <div class="btn-spinner" id="btn-spinner" style="display:none;"></div>
     </button>
 
+    <!-- Shown INSTEAD of the card form + Start button when a 100%-off promo
+         code brings today's total to $0. No card is collected; this calls
+         claim-free-boost.js, which never touches Stripe billing. -->
+    <button class="btn-pay" id="free-btn" style="display:none;" onclick="handleFreeBoost()">
+      <span id="free-btn-label">Get my free Boost AI →</span>
+      <div class="btn-spinner" id="free-btn-spinner" style="display:none;"></div>
+    </button>
+
     <div class="cancel-note" id="cancel-note" style="display:none;">
       You'll be billed $999 today, then $999 every 30 days. Cancel anytime, no contract.
     </div>
@@ -281,7 +289,11 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
   var currentSubscriptionId = null;   // set once create-subscription responds
   var currentCustomerId     = null;
   var promoApplied          = false;
-  var BASE_MONTHLY_CENTS    = 99900;  // $999.00 — must match the Boost AI Price in Stripe
+  var appliedPromoCode      = '';     // code currently applied (used by the free claim)
+  var isFreeCheckout        = false;  // true once a 100%-off code has been applied
+  var initiateCheckoutFired = false;
+  var BASE_MONTHLY_CENTS    = 99900;  // $999.00 — display fallback only; Stripe's Price is the source of truth
+  var currentTodayCents     = 99900;  // amount actually due today, always taken from server responses
 
   /* ── Mount (or re-mount, after a coupon apply/remove) the Payment
         Element against a given clientSecret. Coupon changes on this page
@@ -360,20 +372,19 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       var data = await resp.json();
       currentSubscriptionId = data.subscriptionId;
       currentCustomerId     = data.customerId;
+      if (typeof data.todayTotalCents === 'number') currentTodayCents = data.todayTotalCents;
 
       await mountPaymentElement(data.clientSecret);
 
       document.getElementById('loading-overlay').style.display = 'none';
-      document.getElementById('payment-element').style.display = '';
-      document.getElementById('pay-btn').style.display         = '';
-      document.getElementById('cancel-note').style.display     = '';
-      document.getElementById('secure-note').style.display     = '';
+      showPaidUI();
 
       // Meta Pixel - InitiateCheckout fires once the Stripe card form has
       // actually rendered in front of the visitor. If the subscription call
       // or Stripe fails, the form never renders and no event fires, which is
       // correct: those visitors did not really initiate a checkout.
-      if (typeof fbq === 'function') {
+      if (!initiateCheckoutFired && typeof fbq === 'function') {
+        initiateCheckoutFired = true;
         fbq('track', 'InitiateCheckout', {
           value: 999.00,
           currency: 'USD'
@@ -398,6 +409,28 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     el.textContent = msg;
     el.style.display = 'block';
     el.className = isError ? '' : 'success';
+  }
+
+  /* Card form + Start button (normal / discounted paid checkout) */
+  function showPaidUI() {
+    isFreeCheckout = false;
+    document.getElementById('payment-element').style.display = '';
+    document.getElementById('pay-btn').style.display         = '';
+    document.getElementById('free-btn').style.display        = 'none';
+    document.getElementById('cancel-note').style.display     = '';
+    document.getElementById('secure-note').style.display     = '';
+  }
+
+  /* "Get my free Boost AI" button, in place of the card form (100%-off codes) */
+  function showFreeUI() {
+    isFreeCheckout = true;
+    if (paymentElement) { try { paymentElement.unmount(); } catch (e) {} paymentElement = null; }
+    document.getElementById('loading-overlay').style.display = 'none';
+    document.getElementById('payment-element').style.display = 'none';
+    document.getElementById('pay-btn').style.display         = 'none';
+    document.getElementById('free-btn').style.display        = '';
+    document.getElementById('cancel-note').style.display     = 'none';
+    document.getElementById('secure-note').style.display     = 'none';
   }
 
   function fmt(cents) { return '$' + (cents / 100).toFixed(2); }
@@ -473,11 +506,24 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
       var data = await resp.json();
       if (!resp.ok) throw new Error(data.error || (action === 'apply' ? 'Invalid code' : 'Could not remove code'));
 
-      currentSubscriptionId = data.subscriptionId;
-      await mountPaymentElement(data.clientSecret);
-      updateTotalsUI(data.todayTotalCents, data.discountCents, data.coupon);
+      if (data.free) {
+        // 100%-off — server canceled the incomplete subscription and created
+        // nothing. Switch to the free flow; there is no PaymentIntent to mount.
+        currentSubscriptionId = null;
+        currentTodayCents     = 0;
+        updateTotalsUI(0, data.discountCents, data.coupon);
+        document.getElementById('total-val').textContent = '$0.00';
+        showFreeUI();
+      } else {
+        currentSubscriptionId = data.subscriptionId;
+        currentTodayCents     = data.todayTotalCents;
+        await mountPaymentElement(data.clientSecret);
+        updateTotalsUI(data.todayTotalCents, data.discountCents, data.coupon);
+        showPaidUI();
+      }
 
       if (action === 'apply') {
+        appliedPromoCode = code;
         promoApplied    = true;
         input.disabled  = true;
         btn.textContent = 'Remove';
@@ -485,6 +531,7 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
         msg.style.color = 'var(--teal)'; msg.style.display = 'block';
       } else {
         promoApplied    = false;
+        appliedPromoCode = '';
         input.value     = '';
         input.disabled  = false;
         btn.textContent = 'Apply';
@@ -531,7 +578,10 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     var result = await stripe.confirmPayment({
       elements: elements,
       confirmParams: {
-        return_url: window.location.origin + '/boost-subscription-thank-you.html',
+        // amount = what was ACTUALLY charged today (cents), so the thank-you
+        // page can report the real value to Google Ads / GA4 / Meta / OpenAI.
+        return_url: window.location.origin + '/boost-subscription-thank-you.html'
+          + '?amount=' + encodeURIComponent(currentTodayCents) + '&currency=USD',
         payment_method_data: {
           billing_details: { name: firstName + ' ' + bizName, email: email }
         }
@@ -542,6 +592,58 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     if (result.error) {
       showMsg(result.error.message, true);
       setLoading(false);
+    }
+  }
+
+  /* ── Free path: User clicks "Get my free Boost AI"
+        • claim-free-boost.js re-validates the code server-side, records the
+          redemption and fires the same Clay confirmation as paid Boost orders.
+        • No Stripe subscription / PaymentIntent is created.
+        • Redirect WITHOUT redirect_status=succeeded so no ad platform records
+          a paid conversion. ── */
+  async function handleFreeBoost() {
+    var lead = {
+      firstName: document.getElementById('firstName').value.trim(),
+      business:  document.getElementById('bizName').value.trim(),
+      email:     document.getElementById('email').value.trim(),
+      phone:     document.getElementById('phone').value.trim(),
+      city:      document.getElementById('city').value.trim(),
+      website:   document.getElementById('website').value.trim(),
+    };
+
+    if (!lead.firstName || !lead.business || !lead.email) {
+      showMsg('Please fill in your name, business name, and email.', true);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email)) {
+      showMsg('Please enter a valid email address.', true);
+      return;
+    }
+    if (!appliedPromoCode) {
+      showMsg('Please apply your promo code first.', true);
+      return;
+    }
+
+    var btn     = document.getElementById('free-btn');
+    var label   = document.getElementById('free-btn-label');
+    var spinner = document.getElementById('free-btn-spinner');
+    btn.disabled = true; label.style.display = 'none'; spinner.style.display = '';
+    document.getElementById('payment-message').style.display = 'none';
+
+    try {
+      var resp = await fetch('/.netlify/functions/claim-free-boost', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(Object.assign({ code: appliedPromoCode }, lead)),
+      });
+      var data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Could not claim your free plan');
+
+      var params = new URLSearchParams({ free: '1', promo: appliedPromoCode, email: lead.email });
+      window.location.href = '/boost-subscription-thank-you.html?' + params.toString();
+    } catch (e) {
+      showMsg(e.message, true);
+      btn.disabled = false; label.style.display = ''; spinner.style.display = 'none';
     }
   }
 

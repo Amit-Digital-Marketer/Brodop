@@ -26,35 +26,51 @@ fbq('track', 'PageView');
 
   // Purchase events fire ONLY on a genuine Stripe redirect. Stripe appends
   // redirect_status=succeeded and a payment_intent id to the return_url after
-  // the first subscription invoice is paid. A direct visit or bookmark has
-  // neither, so no conversion fires. payment_intent is passed as transaction_id
-  // so a page refresh cannot double-count the same subscription.
+  // the first subscription invoice is paid. A direct visit, a bookmark, or a
+  // FREE plan claimed via claim-free-boost.js (which redirects here with
+  // `free=1` and deliberately no redirect_status) has none of that, so no
+  // paid conversion ever fires for those. payment_intent is passed as
+  // transaction_id so a page refresh cannot double-count the same subscription.
+  //
+  // `amount` (cents) is appended to the return_url by checkout-boost.html's
+  // handlePayment() and reflects whatever was ACTUALLY charged today — full
+  // $999 or a discounted first-month amount — so every network reports the
+  // real order value instead of an assumed flat $999.
   (function () {
     var params = new URLSearchParams(window.location.search);
     if (params.get('redirect_status') !== 'succeeded') return;
     var txnId = params.get('payment_intent') || '';
 
-    // Google Ads - $999 Monthly AI Subscription purchase conversion
+    var amountCents = parseInt(params.get('amount'), 10);
+    if (isNaN(amountCents) || amountCents <= 0) amountCents = 99900; // fallback only if the param is ever missing
+    var amountDollars = amountCents / 100;
+    var currency = (params.get('currency') || 'USD').toUpperCase();
+
+    // Google Ads - Monthly AI Subscription purchase conversion, actual amount charged
     gtag('event', 'conversion', {
       'send_to': 'AW-18239165178/3eECCI-FicEcEPqljvlD',
+      'value': amountDollars,
+      'currency': currency,
       'transaction_id': txnId
     });
 
-    // Google Analytics 4 - purchase event
+    // Google Analytics 4 - purchase event, actual amount charged
     gtag('event', 'purchase', {
       'send_to': 'G-Z1K9N4CKEL',
       'event_category': 'ecommerce',
       'event_label': 'boost_ai_subscription',
-      'value': 999,
+      'value': amountDollars,
+      'currency': currency,
       'transaction_id': txnId
     });
 
-    // Meta Pixel - $999 Boost AI subscription purchase. eventID uses the Stripe
-    // payment_intent so Meta can deduplicate if the page is refreshed.
+    // Meta Pixel - Boost AI subscription purchase, actual amount charged.
+    // eventID uses the Stripe payment_intent so Meta can deduplicate if the
+    // page is refreshed.
     if (typeof fbq === 'function') {
       fbq('track', 'Purchase', {
-        value: 999.00,
-        currency: 'USD'
+        value: amountDollars,
+        currency: currency
       }, {
         eventID: txnId
       });
@@ -78,21 +94,28 @@ fbq('track', 'PageView');
 
   // Fire the purchase conversion ONLY on a genuine Stripe redirect.
   // Stripe appends redirect_status=succeeded and a payment_intent id to the
-  // return_url after the first subscription invoice is paid. A direct visit
-  // has neither, so no conversion fires. The payment_intent is used as the
-  // event_id so a page refresh cannot double-count the same order.
+  // return_url after the first subscription invoice is paid. A direct visit,
+  // or a FREE plan claimed via claim-free-boost.js, has neither, so no paid
+  // conversion fires for those. The payment_intent is used as the event_id
+  // so a page refresh cannot double-count the same order. `amount` reflects
+  // whatever was actually charged today (see checkout-boost.html's handlePayment()).
   (function () {
     var params = new URLSearchParams(window.location.search);
     if (params.get("redirect_status") === "succeeded") {
       var pi = params.get("payment_intent") || ("boost_" + Date.now());
+
+      var amountCents = parseInt(params.get('amount'), 10);
+      if (isNaN(amountCents) || amountCents <= 0) amountCents = 99900; // fallback only if the param is ever missing
+      var currency = (params.get('currency') || 'USD').toUpperCase();
+
       // Event name must match the OpenAI Ads conversion for the Boost pixel,
       // which is configured as "subscription_created" (the $49 page uses
       // "order_created"). Mismatched names are silently not counted.
       oaiq("measure", "subscription_created", {
         type: "plan_enrollment",
         plan_id: "boost_ai_monthly",
-        amount: 99900,
-        currency: "USD"
+        amount: amountCents,
+        currency: currency
       }, {
         event_id: pi
       });
