@@ -4,3 +4,12 @@
 
 [functions]
   node_bundler = "esbuild"
+
+# Audit PDFs: serve from bias.brodop.ai/reports/... instead of the shared
+# pub-....r2.dev address, which spam filters distrust. Netlify fetches the
+# file from R2 behind the scenes; the address stays on our own domain.
+[[redirects]]
+  from = "/reports/*"
+  to = "https://pub-f06d42b036e34d2d9cc6af8cd010af19.r2.dev/:splat"
+  status = 200
+  force = true
