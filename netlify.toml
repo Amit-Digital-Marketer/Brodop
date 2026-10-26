@@ -13,3 +13,11 @@
   to = "https://pub-f06d42b036e34d2d9cc6af8cd010af19.r2.dev/:splat"
   status = 200
   force = true
+
+# Scoring methodology PDF (linked in the first Zapier email). Same idea: our
+# own domain instead of the shared pub-....r2.dev address.
+[[redirects]]
+  from = "/methodology.pdf"
+  to = "https://pub-fed3776590db44bc928c269fde2db396.r2.dev/AI-Visibility-Score-Methodology.pdf"
+  status = 200
+  force = true
