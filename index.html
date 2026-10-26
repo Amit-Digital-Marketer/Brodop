@@ -480,11 +480,10 @@ fbq('track', 'PageView');
 
   /* testimonial video (Wistia 4w4dbvq8vf, vertical 9:16) beside the quote cards */
   .testi-layout{display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:24px;align-items:start;}
-  .testi-video{
-    position:sticky;top:96px;
-    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:8px;overflow:hidden;
-  }
+  .testi-side{display:flex;flex-direction:column;gap:20px;}
+  /* video + Patrick's quote share one card: video on top, quote below */
+  .testi-card.testi-video{padding:8px;overflow:hidden;}
+  .testi-video-body{padding:22px 20px 20px;}
   .testi-video wistia-player{display:block;border-radius:12px;overflow:hidden;}
   wistia-player[media-id='4w4dbvq8vf']:not(:defined){
     background:center / contain no-repeat url('https://fast.wistia.com/embed/medias/4w4dbvq8vf/swatch');
@@ -492,7 +491,7 @@ fbq('track', 'PageView');
   }
   @media(max-width:1000px){
     .testi-layout{grid-template-columns:1fr;}
-    .testi-video{position:static;width:100%;max-width:340px;margin:0 auto;}
+    .testi-side{width:100%;max-width:340px;margin:0 auto;}
   }
 
   /* ---------- faq ---------- */
@@ -862,8 +861,18 @@ src="https://www.facebook.com/tr?id=1049126017867193&ev=PageView&noscript=1"
     </div>
     <div class="testi-layout">
     <!-- Client testimonial video (Wistia media 4w4dbvq8vf). Scripts load once, near </body>. -->
-    <div class="testi-video reveal">
-      <wistia-player media-id="4w4dbvq8vf" aspect="0.5625"></wistia-player>
+    <div class="testi-side">
+      <div class="testi-card testi-video reveal">
+        <wistia-player media-id="4w4dbvq8vf" aspect="0.5625"></wistia-player>
+        <div class="testi-video-body">
+        <div class="stars">★★★★★</div>
+        <p class="quote">"You need a resource you can trust. Look no further. BroDop is here."</p>
+        <div class="who">
+          <div class="avatar">PC</div>
+          <div><div class="name">Patrick Convery</div><div class="role">Sr. Director, Franchise Marketing, Zoom Drain</div></div>
+        </div>
+        </div>
+      </div>
     </div>
     <div class="testi-grid">
       <div class="testi-card reveal">
